@@ -1,316 +1,264 @@
-import asyncio
-import json
+"""
+Streaming utilities for real-time progress updates.
+
+This module provides streaming capabilities for the Virtual PR Firm to deliver
+real-time progress updates, milestone notifications, and agent reasoning to users.
+"""
+
 import logging
-from typing import Dict, List, Any, Optional, Generator, Callable
-from datetime import datetime
+import time
+import json
+from typing import Dict, Any, Optional, Callable, List
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-class MessageType(Enum):
-    MILESTONE = "milestone"
+logger = logging.getLogger(__name__)
+
+class MilestoneType(Enum):
+    """Types of milestones that can be streamed."""
+    START = "start"
     PROGRESS = "progress"
-    AGENT_REASONING = "agent_reasoning"
+    COMPLETE = "complete"
     ERROR = "error"
-    COMPLETION = "completion"
-    FEEDBACK = "feedback"
+    WARNING = "warning"
+    INFO = "info"
 
 @dataclass
-class StreamMessage:
-    """Structured message for streaming"""
-    type: MessageType
-    role: str
-    content: str
-    timestamp: datetime
-    metadata: Optional[Dict[str, Any]] = None
+class Milestone:
+    """Represents a milestone event."""
+    type: MilestoneType
+    message: str
+    node_name: Optional[str] = None
+    progress: Optional[float] = None
+    data: Optional[Dict[str, Any]] = None
+    timestamp: Optional[float] = None
+    
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = time.time()
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization"""
+        """Convert to dictionary for serialization."""
         return {
             "type": self.type.value,
-            "role": self.role,
-            "content": self.content,
-            "timestamp": self.timestamp.isoformat(),
-            "metadata": self.metadata or {}
+            "message": self.message,
+            "node_name": self.node_name,
+            "progress": self.progress,
+            "data": self.data,
+            "timestamp": self.timestamp
         }
-
-class StreamingManager:
-    """Manages real-time streaming of messages to UI"""
-    
-    def __init__(self):
-        self.messages: List[StreamMessage] = []
-        self.subscribers: List[Callable[[StreamMessage], None]] = []
-        self.logger = logging.getLogger(__name__)
-        
-    def emit(self, role: str, content: str, 
-             message_type: MessageType = MessageType.MILESTONE,
-             metadata: Optional[Dict[str, Any]] = None):
-        """Emit a message to all subscribers"""
-        message = StreamMessage(
-            type=message_type,
-            role=role,
-            content=content,
-            timestamp=datetime.now(),
-            metadata=metadata
-        )
-        
-        self.messages.append(message)
-        self.logger.info(f"Streaming: {role} - {content[:100]}...")
-        
-        # Notify all subscribers
-        for subscriber in self.subscribers:
-            try:
-                subscriber(message)
-            except Exception as e:
-                self.logger.error(f"Error in subscriber: {e}")
-    
-    def subscribe(self, callback: Callable[[StreamMessage], None]):
-        """Subscribe to streaming messages"""
-        self.subscribers.append(callback)
-    
-    def unsubscribe(self, callback: Callable[[StreamMessage], None]):
-        """Unsubscribe from streaming messages"""
-        if callback in self.subscribers:
-            self.subscribers.remove(callback)
-    
-    def get_messages(self, message_type: Optional[MessageType] = None, 
-                    limit: Optional[int] = None) -> List[StreamMessage]:
-        """Get messages with optional filtering"""
-        messages = self.messages
-        
-        if message_type:
-            messages = [msg for msg in messages if msg.type == message_type]
-        
-        if limit:
-            messages = messages[-limit:]
-        
-        return messages
-    
-    def clear_messages(self):
-        """Clear all messages"""
-        self.messages.clear()
 
 class ProgressTracker:
-    """Tracks progress through workflow stages"""
+    """Tracks progress across multiple nodes."""
     
-    def __init__(self, total_stages: int = 10):
-        self.total_stages = total_stages
-        self.current_stage = 0
-        self.completed_stages = []
-        self.stage_details = {}
-        self.streaming_manager = StreamingManager()
+    def __init__(self, total_nodes: int = 10):
+        self.total_nodes = total_nodes
+        self.completed_nodes = 0
+        self.current_node = None
+        self.start_time = time.time()
     
-    def start_stage(self, stage_name: str, description: str = ""):
-        """Start a new stage"""
-        self.current_stage += 1
-        self.stage_details[stage_name] = {
-            "start_time": datetime.now(),
-            "description": description,
-            "status": "in_progress"
-        }
-        
-        self.streaming_manager.emit(
-            "system",
-            f"Starting stage {self.current_stage}/{self.total_stages}: {stage_name}",
-            MessageType.PROGRESS,
-            {"stage": stage_name, "stage_number": self.current_stage}
-        )
+    def start_node(self, node_name: str):
+        """Mark the start of a node execution."""
+        self.current_node = node_name
+        logger.info(f"Starting node: {node_name}")
     
-    def complete_stage(self, stage_name: str, result: str = ""):
-        """Complete a stage"""
-        if stage_name in self.stage_details:
-            self.stage_details[stage_name]["end_time"] = datetime.now()
-            self.stage_details[stage_name]["status"] = "completed"
-            self.stage_details[stage_name]["result"] = result
-        
-        self.completed_stages.append(stage_name)
-        
-        progress_percent = (len(self.completed_stages) / self.total_stages) * 100
-        
-        self.streaming_manager.emit(
-            "system",
-            f"Completed: {stage_name} ({progress_percent:.1f}%)",
-            MessageType.PROGRESS,
-            {"stage": stage_name, "progress": progress_percent}
-        )
+    def complete_node(self, node_name: str):
+        """Mark the completion of a node."""
+        self.completed_nodes += 1
+        self.current_node = None
+        logger.info(f"Completed node: {node_name} ({self.completed_nodes}/{self.total_nodes})")
     
-    def fail_stage(self, stage_name: str, error: str):
-        """Mark a stage as failed"""
-        if stage_name in self.stage_details:
-            self.stage_details[stage_name]["end_time"] = datetime.now()
-            self.stage_details[stage_name]["status"] = "failed"
-            self.stage_details[stage_name]["error"] = error
-        
-        self.streaming_manager.emit(
-            "system",
-            f"Failed: {stage_name} - {error}",
-            MessageType.ERROR,
-            {"stage": stage_name, "error": error}
-        )
+    def get_progress(self) -> float:
+        """Get current progress as a percentage."""
+        return (self.completed_nodes / self.total_nodes) * 100
     
-    def get_progress(self) -> Dict[str, Any]:
-        """Get current progress information"""
-        return {
-            "current_stage": self.current_stage,
-            "completed_stages": self.completed_stages,
-            "total_stages": self.total_stages,
-            "progress_percent": (len(self.completed_stages) / self.total_stages) * 100,
-            "stage_details": self.stage_details
-        }
+    def get_eta(self) -> Optional[float]:
+        """Estimate time to completion."""
+        if self.completed_nodes == 0:
+            return None
+        
+        elapsed = time.time() - self.start_time
+        rate = self.completed_nodes / elapsed
+        remaining = self.total_nodes - self.completed_nodes
+        
+        return remaining / rate if rate > 0 else None
 
-class AgentChatLogger:
-    """Logs agent-to-agent communications for transparency"""
+class StreamingManager:
+    """Manages real-time streaming of progress and milestones."""
     
-    def __init__(self):
-        self.conversations: List[Dict[str, Any]] = []
-        self.streaming_manager = StreamingManager()
+    def __init__(self, stream_callback: Optional[Callable[[Milestone], None]] = None):
+        self.stream_callback = stream_callback
+        self.progress_tracker = ProgressTracker()
+        self.milestones: List[Milestone] = []
+        self.is_streaming = False
     
-    def log_agent_message(self, agent_name: str, message: str, 
-                         reasoning: Optional[str] = None,
-                         metadata: Optional[Dict[str, Any]] = None):
-        """Log a message from an agent"""
-        conversation_entry = {
-            "timestamp": datetime.now(),
-            "agent": agent_name,
-            "message": message,
-            "reasoning": reasoning,
-            "metadata": metadata or {}
-        }
-        
-        self.conversations.append(conversation_entry)
-        
-        # Stream the message
-        self.streaming_manager.emit(
-            agent_name,
-            message,
-            MessageType.AGENT_REASONING,
-            {
-                "reasoning": reasoning,
-                "agent": agent_name,
-                **metadata or {}
-            }
-        )
-    
-    def log_agent_reasoning(self, agent_name: str, reasoning: str,
-                           context: Optional[Dict[str, Any]] = None):
-        """Log agent reasoning process"""
-        self.log_agent_message(
-            agent_name,
-            f"Reasoning: {reasoning}",
-            reasoning=reasoning,
-            metadata={"context": context}
-        )
-    
-    def get_conversation_history(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Get conversation history"""
-        conversations = self.conversations
-        if limit:
-            conversations = conversations[-limit:]
-        return conversations
-    
-    def get_agent_conversations(self, agent_name: str) -> List[Dict[str, Any]]:
-        """Get conversations for a specific agent"""
-        return [conv for conv in self.conversations if conv["agent"] == agent_name]
-
-class MilestoneStreamer:
-    """Streams milestone updates to UI"""
-    
-    def __init__(self):
-        self.streaming_manager = StreamingManager()
+    def start_streaming(self):
+        """Start the streaming session."""
+        self.is_streaming = True
         self.milestones = []
+        self.progress_tracker = ProgressTracker()
+        self.emit_milestone(MilestoneType.START, "Starting Virtual PR Firm pipeline")
     
-    def emit_milestone(self, milestone: str, details: Optional[str] = None):
-        """Emit a milestone update"""
-        self.milestones.append({
-            "milestone": milestone,
-            "details": details,
-            "timestamp": datetime.now()
-        })
+    def stop_streaming(self):
+        """Stop the streaming session."""
+        self.is_streaming = False
+        self.emit_milestone(MilestoneType.COMPLETE, "Pipeline completed")
+    
+    def emit_milestone(self, 
+                      milestone_type: MilestoneType, 
+                      message: str, 
+                      node_name: Optional[str] = None,
+                      data: Optional[Dict[str, Any]] = None):
+        """Emit a milestone event."""
+        if not self.is_streaming:
+            return
         
-        self.streaming_manager.emit(
-            "system",
-            f"Milestone: {milestone}",
-            MessageType.MILESTONE,
-            {"details": details, "milestone": milestone}
+        progress = self.progress_tracker.get_progress()
+        milestone = Milestone(
+            type=milestone_type,
+            message=message,
+            node_name=node_name,
+            progress=progress,
+            data=data
+        )
+        
+        self._emit_milestone(milestone)
+    
+    def _emit_milestone(self, milestone: Milestone):
+        """Internal method to emit a milestone."""
+        self.milestones.append(milestone)
+        
+        if self.stream_callback:
+            try:
+                self.stream_callback(milestone)
+            except Exception as e:
+                logger.error(f"Error in stream callback: {e}")
+        
+        # Log milestone
+        log_level = {
+            MilestoneType.START: logging.INFO,
+            MilestoneType.PROGRESS: logging.INFO,
+            MilestoneType.COMPLETE: logging.INFO,
+            MilestoneType.ERROR: logging.ERROR,
+            MilestoneType.WARNING: logging.WARNING,
+            MilestoneType.INFO: logging.INFO
+        }.get(milestone.type, logging.INFO)
+        
+        logger.log(log_level, f"[{milestone.type.value.upper()}] {milestone.message}")
+    
+    def start_node(self, node_name: str):
+        """Mark the start of a node execution."""
+        self.progress_tracker.start_node(node_name)
+        self.emit_milestone(
+            MilestoneType.PROGRESS,
+            f"Executing {node_name}",
+            node_name=node_name
         )
     
-    def emit_completion(self, task_name: str, result: str):
-        """Emit completion message"""
-        self.streaming_manager.emit(
-            "system",
-            f"Completed: {task_name}",
-            MessageType.COMPLETION,
-            {"task": task_name, "result": result}
+    def complete_node(self, node_name: str, result: Optional[Dict[str, Any]] = None):
+        """Mark the completion of a node."""
+        self.progress_tracker.complete_node(node_name)
+        self.emit_milestone(
+            MilestoneType.PROGRESS,
+            f"Completed {node_name}",
+            node_name=node_name,
+            data=result
         )
     
-    def emit_error(self, error: str, context: Optional[str] = None):
-        """Emit error message"""
-        self.streaming_manager.emit(
-            "system",
-            f"Error: {error}",
-            MessageType.ERROR,
-            {"context": context, "error": error}
+    def emit_error(self, message: str, node_name: Optional[str] = None, error_data: Optional[Dict[str, Any]] = None):
+        """Emit an error milestone."""
+        self.emit_milestone(
+            MilestoneType.ERROR,
+            message,
+            node_name=node_name,
+            data=error_data
         )
+    
+    def emit_warning(self, message: str, node_name: Optional[str] = None, warning_data: Optional[Dict[str, Any]] = None):
+        """Emit a warning milestone."""
+        self.emit_milestone(
+            MilestoneType.WARNING,
+            message,
+            node_name=node_name,
+            data=warning_data
+        )
+    
+    def emit_info(self, message: str, node_name: Optional[str] = None, info_data: Optional[Dict[str, Any]] = None):
+        """Emit an info milestone."""
+        self.emit_milestone(
+            MilestoneType.INFO,
+            message,
+            node_name=node_name,
+            data=info_data
+        )
+    
+    def get_milestones(self) -> List[Dict[str, Any]]:
+        """Get all milestones as dictionaries."""
+        return [milestone.to_dict() for milestone in self.milestones]
+    
+    def get_progress(self) -> float:
+        """Get current progress percentage."""
+        return self.progress_tracker.get_progress()
+    
+    def get_eta(self) -> Optional[float]:
+        """Get estimated time to completion."""
+        return self.progress_tracker.get_eta()
 
-# Global instances
-_streaming_manager = StreamingManager()
-_progress_tracker = ProgressTracker()
-_agent_chat_logger = AgentChatLogger()
-_milestone_streamer = MilestoneStreamer()
+class GradioStreamingManager(StreamingManager):
+    """Streaming manager specifically for Gradio interfaces."""
+    
+    def __init__(self, progress_bar=None, status_text=None):
+        super().__init__()
+        self.progress_bar = progress_bar
+        self.status_text = status_text
+    
+    def _emit_milestone(self, milestone: Milestone):
+        """Override to update Gradio components."""
+        super()._emit_milestone(milestone)
+        
+        # Update progress bar
+        if self.progress_bar and milestone.progress is not None:
+            try:
+                self.progress_bar.update(milestone.progress / 100)
+            except Exception as e:
+                logger.error(f"Error updating progress bar: {e}")
+        
+        # Update status text
+        if self.status_text:
+            try:
+                status = f"{milestone.message}"
+                if milestone.node_name:
+                    status += f" ({milestone.node_name})"
+                self.status_text.update(status)
+            except Exception as e:
+                logger.error(f"Error updating status text: {e}")
 
-def get_streaming_manager() -> StreamingManager:
-    """Get global streaming manager instance"""
-    return _streaming_manager
+def create_streaming_manager(stream_callback: Optional[Callable[[Milestone], None]] = None) -> StreamingManager:
+    """Factory function to create a streaming manager."""
+    return StreamingManager(stream_callback)
 
-def get_progress_tracker() -> ProgressTracker:
-    """Get global progress tracker instance"""
-    return _progress_tracker
+def create_gradio_streaming_manager(progress_bar=None, status_text=None) -> GradioStreamingManager:
+    """Factory function to create a Gradio streaming manager."""
+    return GradioStreamingManager(progress_bar, status_text)
 
-def get_agent_chat_logger() -> AgentChatLogger:
-    """Get global agent chat logger instance"""
-    return _agent_chat_logger
-
-def get_milestone_streamer() -> MilestoneStreamer:
-    """Get global milestone streamer instance"""
-    return _milestone_streamer
-
-def emit(role: str, text: str, message_type: MessageType = MessageType.MILESTONE,
-         metadata: Optional[Dict[str, Any]] = None):
-    """Convenience function to emit messages"""
-    _streaming_manager.emit(role, text, message_type, metadata)
-
-def messages() -> Generator[Dict[str, Any], None, None]:
-    """Generator for UI to consume messages"""
-    for message in _streaming_manager.messages:
-        yield message.to_dict()
-
-def clear_messages():
-    """Clear all messages"""
-    _streaming_manager.clear_messages()
-
+# Test function for development
 if __name__ == "__main__":
-    # Test the streaming system
-    streaming_manager = get_streaming_manager()
-    progress_tracker = get_progress_tracker()
-    agent_logger = get_agent_chat_logger()
-    milestone_streamer = get_milestone_streamer()
+    # Test streaming manager
+    def test_callback(milestone: Milestone):
+        print(f"Stream: {milestone.to_dict()}")
     
-    # Test milestone streaming
-    milestone_streamer.emit_milestone("Starting content generation", "Initializing workflow")
-    milestone_streamer.emit_milestone("Brand Bible parsed", "Voice and tone extracted")
-    milestone_streamer.emit_completion("Content generation", "All platforms completed")
+    manager = create_streaming_manager(test_callback)
+    manager.start_streaming()
     
-    # Test agent logging
-    agent_logger.log_agent_message("ContentCraftsman", "Generated initial content structure")
-    agent_logger.log_agent_reasoning("StyleEditor", "Checking for AI fingerprints and style violations")
+    manager.start_node("EngagementManagerNode")
+    time.sleep(0.1)
+    manager.complete_node("EngagementManagerNode")
     
-    # Test progress tracking
-    progress_tracker.start_stage("Content Generation", "Creating content for all platforms")
-    progress_tracker.complete_stage("Content Generation", "Successfully generated content")
+    manager.start_node("BrandBibleIngestNode")
+    time.sleep(0.1)
+    manager.complete_node("BrandBibleIngestNode")
     
-    # Print all messages
-    print("All messages:")
-    for message in streaming_manager.get_messages():
-        print(f"- {message.role}: {message.content}")
+    manager.stop_streaming()
     
-    print(f"\nProgress: {progress_tracker.get_progress()}")
-    print(f"Agent conversations: {len(agent_logger.get_conversation_history())}")
+    print(f"Final progress: {manager.get_progress()}%")
+    print(f"Total milestones: {len(manager.get_milestones())}")

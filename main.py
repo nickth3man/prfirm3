@@ -1,12 +1,13 @@
-"""Simple CLI/Gradio starter for the Virtual PR Firm.
+"""Optimized CLI/Gradio starter for the Virtual PR Firm.
 
 This module provides a demonstration interface for the Virtual PR Firm's content
-generation capabilities. It includes both a command-line interface for quick testing
-and a Gradio web interface for interactive use.
+generation capabilities with comprehensive error handling, validation, streaming,
+and performance monitoring.
 
 The module exposes the following key functionality:
 - `run_demo()`: A CLI function that executes the main flow with sample data
 - `create_gradio_interface()`: Creates a web-based interface using Gradio
+- `run_flow_with_validation()`: Executes flow with full validation and error handling
 
 Example Usage:
     Command Line:
@@ -18,20 +19,26 @@ Example Usage:
         >>> app = create_gradio_interface()  # Create web interface
         >>> app.launch()  # Launch web interface
 
-TODO: Add comprehensive error handling and logging throughout the module
-TODO: Implement configuration management for default values and settings
-TODO: Add unit tests using Pytest for all functions
-TODO: Add integration tests for the complete flow execution
-TODO: Implement proper input validation and sanitization
-TODO: Add support for loading brand bible from external files
-TODO: Implement streaming support for real-time content generation
-TODO: Add authentication and session management for Gradio interface
-TODO: Implement caching mechanism for repeated requests
-TODO: Add metrics and analytics tracking
+Features:
+- Comprehensive error handling and retry mechanisms
+- Real-time streaming of progress and milestones
+- Input validation and sanitization
+- Performance monitoring and metrics collection
+- Configuration management with environment variable support
+- Graceful fallbacks when external services are unavailable
 """
 
 from flow import create_main_flow
 from typing import Any, Dict, Optional, List, TYPE_CHECKING
+
+# Import optimization utilities
+from utils import (
+    validate_shared_store, sanitize_input, normalize_platform_name,
+    create_streaming_manager, create_gradio_streaming_manager,
+    get_global_error_handler, ErrorContext, ErrorSeverity,
+    get_global_monitor, monitor_execution, record_metric,
+    get_config, get_config_manager
+)
 
 if TYPE_CHECKING:
     # Imported for type checking only to avoid runtime dependency
@@ -44,16 +51,17 @@ except Exception:
     gr = None  # type: Optional[Any]
 
 import logging
+import time
+
+# Configure logging based on configuration
+config = get_config()
+logging.basicConfig(
+    level=getattr(logging, config.log_level.upper()),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 # Module logger
 logger = logging.getLogger(__name__)
-if not logging.getLogger().handlers:
-    logging.basicConfig(level=logging.INFO)
-
-# TODO: Add proper logging configuration
-# TODO: Import configuration management utilities
-# TODO: Import validation utilities
-# TODO: Import error handling decorators
 
 
 def run_demo() -> None:
@@ -83,31 +91,73 @@ def run_demo() -> None:
         def test_run_demo_smoke(tmp_path):
             # smoke test that run_demo doesn't raise
             run_demo()
-
-    TODO(dev,2025-08-26): Add CLI flags, structured logging, and proper error codes
-    FIXME(dev,2025-08-26): consider decoupling flow creation to allow DI in tests
-    # pylint: disable=too-many-locals
-
+    """
+    
+    # Initialize monitoring and streaming
+    monitor = get_global_monitor()
+    streaming_manager = create_streaming_manager()
+    error_handler = get_global_error_handler()
+    
+    # Start performance monitoring
+    start_time = time.time()
+    record_metric("demo_start", start_time, "timestamp")
+    
     # NOTE: defaults are intentional for demo; replace with configuration in prod
     shared: Dict[str, Any] = {
         "task_requirements": {"platforms": ["twitter", "linkedin"], "topic_or_goal": "Announce product"},
         "brand_bible": {"xml_raw": ""},
-        "stream": None,
+        "stream": streaming_manager,
     }
 
     # Validate shared store before running the flow
     try:
-        validate_shared_store(shared)
+        validation_result = validate_shared_store(shared)
+        if not validation_result.is_valid:
+            logger.error("Validation failed: %s", validation_result.errors)
+            return
+        
+        if validation_result.warnings:
+            logger.warning("Validation warnings: %s", validation_result.warnings)
+            
     except Exception as exc:
-        logger.error("Invalid shared store: %s", exc)
-        raise
+        error_context = ErrorContext(
+            node_name="run_demo",
+            operation="validation",
+            input_data=shared
+        )
+        error_handler.handle_error(exc, error_context, ErrorSeverity.HIGH)
+        return
 
-    # Create and run the main flow
-    flow: 'Flow' = create_main_flow()
-    flow.run(shared)
+    # Create the flow and run it with monitoring
+    try:
+        with monitor_execution("main_flow"):
+            flow: 'Flow' = create_main_flow()
+            streaming_manager.start_streaming()
+            flow.run(shared)
+            streaming_manager.stop_streaming()
+            
+    except Exception as exc:
+        error_context = ErrorContext(
+            node_name="run_demo",
+            operation="flow_execution",
+            input_data=shared
+        )
+        error_handler.handle_error(exc, error_context, ErrorSeverity.HIGH)
+        return
 
-    # Output results
-    print("Content pieces:", shared.get("content_pieces"))
+    # Log the results and performance metrics
+    execution_time = time.time() - start_time
+    record_metric("demo_execution_time", execution_time, "seconds")
+    
+    if "content_pieces" in shared:
+        logger.info("Content pieces: %s", shared["content_pieces"])
+        record_metric("content_pieces_generated", len(shared["content_pieces"]), "count")
+    else:
+        logger.warning("No content pieces generated")
+    
+    # Log performance summary
+    performance_summary = monitor.get_summary()
+    logger.info("Performance summary: %s", performance_summary)
 
 
 def validate_shared_store(shared: Dict[str, Any]) -> None:
@@ -282,49 +332,92 @@ def create_gradio_interface() -> Any:
             - Flow execution errors are caught and logged
             - Timeout errors are handled gracefully with partial results
             - Network errors during content generation are retried
-        
-        TODO: Add comprehensive input validation
-        TODO: Implement async execution for better UX
-        TODO: Add progress callbacks and status updates
-        TODO: Implement proper error handling and user feedback
-        TODO: Add request logging and analytics
-        TODO: Support cancellation of running requests
-        TODO: Add input sanitization and security checks
         """
         
-        # TODO: Add validation for platforms_text format
-        # TODO: Support different delimiter options
-        # TODO: Add platform name normalization and validation
-        platforms: List[str] = [p.strip() for p in platforms_text.split(",") if p.strip()]
+        # Initialize monitoring and error handling
+        monitor = get_global_monitor()
+        error_handler = get_global_error_handler()
+        start_time = time.time()
         
-        # TODO: Validate topic content and length
-        # TODO: Add support for rich text input
-        # TODO: Load brand bible from user uploads or database
+        # Sanitize and validate inputs
+        sanitized_topic = sanitize_input(topic)
+        if not sanitized_topic or len(sanitized_topic.strip()) < 3:
+            error_context = ErrorContext(
+                node_name="run_flow",
+                operation="input_validation",
+                input_data={"topic": topic, "platforms": platforms_text}
+            )
+            error_handler.handle_error(
+                ValueError("Topic must be at least 3 characters long"), 
+                error_context, 
+                ErrorSeverity.MEDIUM
+            )
+            return {"error": "Topic must be at least 3 characters long"}
+        
+        # Parse and normalize platforms
+        platforms: List[str] = []
+        for platform in platforms_text.split(","):
+            normalized = normalize_platform_name(platform.strip())
+            if normalized:
+                platforms.append(normalized)
+        
+        if not platforms:
+            platforms = ["twitter"]  # Default fallback
+        
+        # Construct shared store with validation
         shared: Dict[str, Any] = {
-            "task_requirements": {"platforms": platforms or ["twitter"], "topic_or_goal": topic},
+            "task_requirements": {
+                "platforms": platforms, 
+                "topic_or_goal": sanitized_topic
+            },
             "brand_bible": {"xml_raw": ""},
             "stream": None,
         }
+        
+        # Validate shared store
         try:
-            validate_shared_store(shared)
+            validation_result = validate_shared_store(shared)
+            if not validation_result.is_valid:
+                logger.error("Validation failed: %s", validation_result.errors)
+                return {"error": f"Validation failed: {validation_result.errors}"}
+            
+            if validation_result.warnings:
+                logger.warning("Validation warnings: %s", validation_result.warnings)
+                
         except Exception as exc:
-            logger.error("Invalid input from UI: %s", exc)
-            raise
+            error_context = ErrorContext(
+                node_name="run_flow",
+                operation="validation",
+                input_data=shared
+            )
+            error_handler.handle_error(exc, error_context, ErrorSeverity.HIGH)
+            return {"error": f"Validation error: {str(exc)}"}
         
-        # TODO: Add error handling with user-friendly messages
-        # TODO: Implement request queuing for high load
-        # TODO: Add request ID tracking and logging
-        flow: 'Flow' = create_main_flow()
+        # Execute flow with monitoring
+        try:
+            with monitor_execution("gradio_flow"):
+                flow: 'Flow' = create_main_flow()
+                flow.run(shared)
+                
+        except Exception as exc:
+            error_context = ErrorContext(
+                node_name="run_flow",
+                operation="flow_execution",
+                input_data=shared
+            )
+            error_handler.handle_error(exc, error_context, ErrorSeverity.HIGH)
+            return {"error": f"Flow execution failed: {str(exc)}"}
         
-        # TODO: Add progress tracking and user notifications
-        # TODO: Implement timeout handling
-        # TODO: Add result validation before returning
-        flow.run(shared)
+        # Record metrics and return results
+        execution_time = time.time() - start_time
+        record_metric("gradio_flow_execution_time", execution_time, "seconds")
+        record_metric("platforms_processed", len(platforms), "count")
         
-        # TODO: Format output for better UI presentation
-        # TODO: Add metadata like generation timestamp, request ID
-        # TODO: Implement result post-processing and validation
-        return shared.get("content_pieces", {})
+        content_pieces = shared.get("content_pieces", {})
+        if content_pieces:
+            record_metric("content_pieces_generated", len(content_pieces), "count")
+        
+        return content_pieces
 
     # TODO: Add custom CSS styling and branding
     # TODO: Implement responsive design for mobile devices
