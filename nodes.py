@@ -152,13 +152,18 @@ class EngagementManagerNode(Node):
         # TODO(Security): Add input size limits to prevent memory exhaustion
         # TODO(Reliability): Implement graceful degradation when optional inputs are missing
         # TODO(Pytest): Add pytest tests for prep() method including edge cases, empty inputs, and state normalization
-        # Ensure task_requirements exists
         shared.setdefault("task_requirements", {
             "platforms": [],
             "intents_by_platform": {},
             "topic_or_goal": "",
         })
-        return shared["task_requirements"]
+        tr = shared["task_requirements"]
+        platforms = tr.get("platforms", [])
+        if not isinstance(platforms, list) or not all(isinstance(p, str) for p in platforms):
+            log.warning("Normalizing invalid platforms; defaulting to ['twitter','linkedin']")
+            platforms = ["twitter", "linkedin"]
+        tr["platforms"] = [p.strip().lower() for p in platforms if isinstance(p, str) and p.strip()]
+        return tr
 
     # TODO(UX): EngagementManagerNode
     # - Implement interactive behavior (CLI / Gradio hooks) to collect missing inputs
@@ -1964,3 +1969,16 @@ class StyleComplianceNode(Node):
     # - TODO(Monitoring): Implement compliance rule monitoring and alerting
     # - TODO(Analytics): Add support for compliance rule analytics and insights
     # - TODO(Pytest): Add pytest tests for comprehensive compliance framework and edit-cycle integration
+class AgencyDirectorNode(Node):
+    """Finalizes the pipeline by consolidating outputs and ending the flow."""
+    def prep(self, shared: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "content_pieces": shared.get("content_pieces", {}),
+            "style_compliance": shared.get("style_compliance", {}),
+        }
+
+    def exec(self, prep_res: Dict[str, Any]) -> Dict[str, Any]:
+        return prep_res
+
+    def post(self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, Any]) -> None:
+        shared["final_output"] = exec_res

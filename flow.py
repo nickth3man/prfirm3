@@ -49,13 +49,9 @@ def create_main_flow():
     # Wire the main pipeline
     engagement_manager >> brand_bible_ingest
     brand_bible_ingest >> voice_alignment
-    voice_alignment >> create_platform_formatting_flow()
-    
-    # TODO: Fix potential issue - create_platform_formatting_flow() is called twice
-    #       This might create duplicate flows or cause unexpected behavior
-    
-    # Connect formatting flow to content generation
+
     formatting_flow = create_platform_formatting_flow()
+    voice_alignment >> formatting_flow
     formatting_flow >> content_craftsman
     content_craftsman >> style_editor
     
@@ -92,25 +88,16 @@ def create_platform_formatting_flow():
             
             Returns a list of parameter dictionaries, one for each platform.
             """
-            # TODO: Validate the structure of shared["task_requirements"] to ensure
-            #       it contains the expected "platforms" key with a list value
-            # TODO: Add schema validation for platform configurations
-            # TODO: Implement platform capability checking to ensure supported platforms
-            
             platforms = shared.get("task_requirements", {}).get("platforms", [])
+            if not isinstance(platforms, list) or not all(isinstance(p, str) for p in platforms):
+                log.warning("Invalid platforms in task_requirements; defaulting to ['twitter','linkedin']")
+                platforms = ["twitter", "linkedin"]
+            platforms = [p.strip().lower() for p in platforms if isinstance(p, str) and p.strip()]
             if not platforms:
-                # Default to common platforms if none specified
                 platforms = ["twitter", "linkedin"]
                 log.warning("No platforms specified, using defaults: %s", platforms)
             
-            # TODO: Add validation for supported platforms (reject unsupported ones)
-            # TODO: Consider adding platform-specific configuration validation
-            
-            # Create parameter dict for each platform
-            platform_params = []
-            for platform in platforms:
-                platform_params.append({"platform": platform})
-            
+            platform_params = [{"platform": p} for p in platforms]
             return platform_params
     
     # Create the formatting node that will process each platform
