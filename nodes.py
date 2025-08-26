@@ -18,8 +18,8 @@ Key Design Principles:
     5. Testability: Clear separation of concerns for unit testing
 
 Node Pipeline Flow:
-    EngagementManagerNode -> BrandBibleIngestNode -> VoiceAlignmentNode 
-    -> PlatformFormattingNode -> ContentCraftsmanNode -> StyleEditorNode 
+    EngagementManagerNode -> BrandBibleIngestNode -> VoiceAlignmentNode
+    -> PlatformFormattingNode -> ContentCraftsmanNode -> StyleEditorNode
     -> StyleComplianceNode (with revision loop)
 
 Shared State Schema:
@@ -153,12 +153,44 @@ class EngagementManagerNode(Node):
         # TODO(Reliability): Implement graceful degradation when optional inputs are missing
         # TODO(Pytest): Add pytest tests for prep() method including edge cases, empty inputs, and state normalization
         # Ensure task_requirements exists
-        shared.setdefault("task_requirements", {
-            "platforms": [],
-            "intents_by_platform": {},
-            "topic_or_goal": "",
-        })
-        return shared["task_requirements"]
+        tr = shared.setdefault(
+            "task_requirements",
+            {"platforms": [], "intents_by_platform": {}, "topic_or_goal": ""},
+        )
+
+        # Collect validation warnings
+        warnings = shared.setdefault("validation_warnings", [])
+
+        if not isinstance(tr, dict):
+            raise TypeError("shared['task_requirements'] must be a dict")
+
+        platforms = tr.get("platforms", [])
+        if not isinstance(platforms, list):
+            warnings.append("'platforms' should be a list")
+            platforms = []
+        else:
+            cleaned = []
+            for p in platforms:
+                if isinstance(p, str) and p.strip():
+                    cleaned.append(p.strip().lower())
+                else:
+                    warnings.append(f"Invalid platform entry: {p!r}")
+            platforms = cleaned
+        tr["platforms"] = platforms
+
+        intents = tr.get("intents_by_platform", {})
+        if not isinstance(intents, dict):
+            warnings.append("'intents_by_platform' should be a dict")
+            intents = {}
+        tr["intents_by_platform"] = intents
+
+        topic = tr.get("topic_or_goal", "")
+        if not isinstance(topic, str):
+            warnings.append("'topic_or_goal' should be a string")
+            topic = ""
+        tr["topic_or_goal"] = topic
+
+        return tr
 
     # TODO(UX): EngagementManagerNode
     # - Implement interactive behavior (CLI / Gradio hooks) to collect missing inputs
@@ -235,7 +267,9 @@ class EngagementManagerNode(Node):
         # TODO: Implement interactive input collection to make fallback redundant
         return prep_res
 
-    def post(self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, Any]) -> str:
+    def post(
+        self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, Any]
+    ) -> str:
         """Persists normalized task requirements and emits completion milestone.
 
         This method finalizes the input collection phase by storing the processed
@@ -368,7 +402,7 @@ class BrandBibleIngestNode(Node):
 
         Input Location Priority:
             1. shared["brand_bible"]["xml_raw"] - Preferred nested location
-            2. shared["brand_bible_xml"] - Legacy flat location  
+            2. shared["brand_bible_xml"] - Legacy flat location
             3. Empty string - Safe default for missing data
 
         Args:
@@ -526,7 +560,9 @@ class BrandBibleIngestNode(Node):
                 pass
             return {"parsed": parsed, "warnings": ["fallback parse used"]}
 
-    def post(self, shared: Dict[str, Any], prep_res: str, exec_res: Dict[str, Any]) -> str:
+    def post(
+        self, shared: Dict[str, Any], prep_res: str, exec_res: Dict[str, Any]
+    ) -> str:
         """Persists parsed brand bible data and warnings to shared state.
 
         This method finalizes the brand bible ingestion process by storing the
@@ -653,7 +689,7 @@ class VoiceAlignmentNode(Node):
         Expected Structure (when available):
             {
                 "name": str,                    # Brand name
-                "voice": Dict[str, Any],        # Voice characteristics  
+                "voice": Dict[str, Any],        # Voice characteristics
                 "guidelines": Dict[str, Any],   # Content guidelines
                 "constraints": Dict[str, Any],  # Content constraints
                 "values": List[str],           # Brand values
@@ -736,7 +772,9 @@ class VoiceAlignmentNode(Node):
             persona.setdefault("required_phrases", [])
             return persona
 
-    def post(self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, Any]) -> str:
+    def post(
+        self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, Any]
+    ) -> str:
         """Persists the aligned persona voice guidelines to shared state.
 
         This method completes the voice alignment process by storing the derived
@@ -888,7 +926,12 @@ class PlatformFormattingNode(Node):
         # TODO(Pytest): Add pytest tests for prep() method including platform validation and aliases
         platform = getattr(self, "params", {}).get("platform") or "general"
         persona = shared.get("brand_bible", {}).get("persona_voice", {})
-        intent = shared.get("task_requirements", {}).get("intents_by_platform", {}).get(platform, {}).get("value")
+        intent = (
+            shared.get("task_requirements", {})
+            .get("intents_by_platform", {})
+            .get(platform, {})
+            .get("value")
+        )
         return platform, persona, intent
 
     # TODO(Enhancement): PlatformFormattingNode
@@ -1002,7 +1045,12 @@ class PlatformFormattingNode(Node):
                 # TODO(Requirements): Add accessibility_requirements, compliance_rules, monetization_guidelines
             }
 
-    def post(self, shared: Dict[str, Any], prep_res: tuple[str, Dict[str, Any], Any], exec_res: Dict[str, Any]) -> str:
+    def post(
+        self,
+        shared: Dict[str, Any],
+        prep_res: tuple[str, Dict[str, Any], Any],
+        exec_res: Dict[str, Any],
+    ) -> str:
         """Persists generated platform guidelines to shared state for downstream access.
 
         This method completes the platform formatting process by storing the generated
@@ -1047,7 +1095,9 @@ class PlatformFormattingNode(Node):
             - Guidelines change detection and notification
             - Integration with platform API updates and changes
         """
-        platform = exec_res.get("platform") if isinstance(exec_res, dict) else prep_res[0]
+        platform = (
+            exec_res.get("platform") if isinstance(exec_res, dict) else prep_res[0]
+        )
         shared.setdefault("platform_guidelines", {})
         shared["platform_guidelines"][platform] = exec_res
         # TODO(Streaming): Emit streaming milestone for platform guideline generation
@@ -1158,7 +1208,7 @@ class ContentCraftsmanNode(Node):
         return {
             "platform_guidelines": shared.get("platform_guidelines", {}),
             "persona": shared.get("brand_bible", {}).get("persona_voice", {}),
-            "topic": shared.get("task_requirements", {}).get("topic_or_goal", "")
+            "topic": shared.get("task_requirements", {}).get("topic_or_goal", ""),
         }
 
     def exec(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -1255,7 +1305,9 @@ class ContentCraftsmanNode(Node):
             drafts[platform] = f"Draft for {platform}: {topic or '[no topic provided]'}"
         return drafts
 
-    def post(self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, str]) -> str:
+    def post(
+        self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, str]
+    ) -> str:
         """Persists generated content drafts and emits generation milestones.
 
         This method completes the content generation process by storing the
@@ -1424,7 +1476,7 @@ class StyleEditorNode(Node):
                     "content_pieces": Dict[str, Dict],  # Generated content by platform
                     "persona": Dict[str, Any]           # Brand voice constraints
                 }
-                
+
                 Content pieces structure:
                 {
                     "platform_name": {
@@ -1432,7 +1484,7 @@ class StyleEditorNode(Node):
                         "sections": Dict[str, str] # Future: Structured sections
                     }
                 }
-                
+
                 Persona structure:
                 {
                     "forbidden_terms": List[str],      # Terms to avoid/replace
@@ -1462,7 +1514,7 @@ class StyleEditorNode(Node):
         # TODO(Pytest): Add pytest tests for prep() method including validation and configuration
         return {
             "content_pieces": shared.get("content_pieces", {}),
-            "persona": shared.get("brand_bible", {}).get("persona_voice", {})
+            "persona": shared.get("brand_bible", {}).get("persona_voice", {}),
         }
 
     def exec(self, inputs: Dict[str, Any]) -> Dict[str, str]:
@@ -1526,6 +1578,7 @@ class StyleEditorNode(Node):
         persona = inputs.get("persona", {})
         try:
             from utils.rewrite_with_constraints import rewrite_with_constraints
+
             # TODO(Error): Add proper error handling for individual platform rewrites
             # TODO(Metrics): Track rewrite metrics (changes made, forbidden terms found, etc.)
             # TODO(Quality): Implement rewrite quality scoring and validation
@@ -1542,7 +1595,9 @@ class StyleEditorNode(Node):
                 # TODO(Platform): Add platform-specific rewrite rules and constraints
                 # TODO(Quality): Implement rewrite quality validation per platform
                 # TODO(Optimization): Add support for incremental rewriting and optimization
-                rewritten[p] = rewrite_with_constraints(payload.get("text", ""), persona, {})
+                rewritten[p] = rewrite_with_constraints(
+                    payload.get("text", ""), persona, {}
+                )
             return rewritten
         except Exception:
             # TODO(Deterministic): Implement pre-apply deterministic regex fixes
@@ -1559,7 +1614,9 @@ class StyleEditorNode(Node):
             # Fallback: naive replace of forbidden terms
             # TODO: Implement deterministic regex fixes and validation of forbidden terms/phrases to make fallback redundant
             rewritten = {}
-            forb = persona.get("forbidden_terms", []) if isinstance(persona, dict) else []
+            forb = (
+                persona.get("forbidden_terms", []) if isinstance(persona, dict) else []
+            )
             for p, payload in content.items():
                 txt = payload.get("text", "")
                 # TODO(Matching): Add case-insensitive matching and word boundary detection
@@ -1581,7 +1638,9 @@ class StyleEditorNode(Node):
                 rewritten[p] = txt
             return rewritten
 
-    def post(self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, str]) -> str:
+    def post(
+        self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, str]
+    ) -> str:
         """Persists rewritten content and updates shared state with refinement results.
 
         This method completes the style editing process by storing the rewritten
@@ -1815,6 +1874,7 @@ class StyleComplianceNode(Node):
         reports = {}
         try:
             from utils.check_style_violations import check_style_violations
+
             # TODO(Error): Add error handling for individual platform checks
             # TODO(Comprehensive): Implement comprehensive compliance checking across all platforms
             # TODO(Priority): Add support for compliance rule prioritization and weighting
@@ -1868,7 +1928,9 @@ class StyleComplianceNode(Node):
                 reports[p] = {"violations": issues, "score": 100 - len(issues) * 10}
         return reports
 
-    def post(self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, Any]) -> str:
+    def post(
+        self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, Any]
+    ) -> str:
         """Stores compliance reports and manages intelligent revision cycle control.
 
         This method completes the style compliance checking process by persisting
