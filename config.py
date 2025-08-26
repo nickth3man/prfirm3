@@ -90,13 +90,37 @@ class AppConfig:
     cache: CacheConfig = field(default_factory=CacheConfig)
     
     def __post_init__(self):
-        """Post-initialization processing."""
+        """
+        Run configuration loading and validation after dataclass initialization.
+        
+        Called automatically after AppConfig is constructed. Loads overrides from environment variables, then attempts to load and apply a YAML configuration file (if configured), and finally validates and normalizes resulting settings. This mutates the AppConfig instance in place to reflect environment/file values and validated fallbacks.
+        """
         self._load_from_env()
         self._load_from_file()
         self._validate()
     
     def _load_from_env(self):
-        """Load configuration from environment variables."""
+        """
+        Load configuration values from environment variables and apply them to this AppConfig instance.
+        
+        One-line summary:
+        Populates relevant sub-configs (logging, gradio, llm, security, cache) and top-level debug flag from environment variables when present.
+        
+        Details:
+        - Updates only when an environment variable is set; existing values are preserved otherwise.
+        - Boolean-like variables accept "true", "1", or "yes" (case-insensitive).
+        - Numeric environment variables are parsed with int() or float() as appropriate.
+        - Environment variables handled:
+          - Logging: LOG_LEVEL, LOG_FORMAT, LOG_FILE
+          - Gradio: GRADIO_PORT, GRADIO_HOST, GRADIO_SHARE, DEMO_PASSWORD (sets gradio.auth as "admin:<password>")
+          - LLM: LLM_PROVIDER, LLM_MODEL, LLM_TEMPERATURE, LLM_MAX_TOKENS
+          - Security: ENABLE_AUTH, RATE_LIMIT_REQUESTS
+          - Cache: REDIS_URL, ENABLE_CACHE
+          - Debug: DEBUG
+        
+        Side effects:
+        Mutates attributes on self and its nested config objects (self.logging, self.gradio, self.llm, self.security, self.cache, self.debug).
+        """
         # Logging
         if env_val := os.getenv("LOG_LEVEL"):
             self.logging.level = env_val
@@ -142,7 +166,11 @@ class AppConfig:
             self.debug = env_val.lower() in ("true", "1", "yes")
     
     def _load_from_file(self):
-        """Load configuration from YAML file if specified."""
+        """
+        Load configuration from a YAML file (if specified) and apply it to this AppConfig.
+        
+        This method checks self.config_file first, falling back to the CONFIG_FILE environment variable. If a path is provided and the file exists, the file is parsed with yaml.safe_load and the resulting mapping is applied via self._apply_dict_config. File-based values are treated as lower priority than environment-variable overrides. If the file is missing the method returns silently after logging a warning; any parsing or IO errors are caught and logged (the method does not raise).
+        """
         config_file = self.config_file or os.getenv("CONFIG_FILE")
         if not config_file:
             return
@@ -164,7 +192,11 @@ class AppConfig:
             logger.error(f"Failed to load configuration file {config_file}: {e}")
     
     def _apply_dict_config(self, config_data: Dict[str, Any]):
-        """Apply configuration from dictionary."""
+        """
+        Apply configuration values from a dictionary to this AppConfig's sub-configuration objects.
+        
+        Only dictionary entries whose top-level key matches an attribute on this AppConfig instance and whose value is a dict are considered. For each matching section, keys that correspond to attributes on the section object are assigned the provided values. Unknown sections, non-dict section values, and unknown keys on section objects are ignored. Mutates the existing sub-configuration objects in place and does not return a value.
+        """
         if not isinstance(config_data, dict):
             return
             
@@ -177,7 +209,19 @@ class AppConfig:
                         setattr(section_obj, key, value)
     
     def _validate(self):
-        """Validate configuration values."""
+        """
+        Validate and normalize AppConfig fields, mutating the instance in-place.
+        
+        Checks and enforces sane values for several sub-configurations, replacing invalid values with safe defaults and emitting warnings:
+        - logging.level: must be one of ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]; defaults to "INFO".
+        - gradio.port: must be in range 1–65535; defaults to 7860.
+        - llm.temperature: must be between 0 and 2 (inclusive); defaults to 0.7.
+        - llm.max_tokens: must be > 0; defaults to 2000.
+        
+        Side effects:
+        - Mutates self to apply fallback values for invalid settings.
+        - Emits warning-level log messages when replacements occur.
+        """
         # Validate logging level
         valid_log_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
         if self.logging.level.upper() not in valid_log_levels:
@@ -200,23 +244,31 @@ class AppConfig:
 
 
 def get_config(config_file: Optional[str] = None) -> AppConfig:
-    """Get application configuration.
+    """
+    Return an AppConfig populated from defaults, environment variables, and an optional YAML file.
     
-    Args:
-        config_file: Optional path to configuration file
-        
+    If provided, config_file is used to load additional settings (lower precedence than environment variables). The returned AppConfig has validation applied and contains nested sub-configurations (logging, gradio, llm, security, cache).
+    
+    Parameters:
+        config_file (Optional[str]): Path to a YAML config file to load (optional).
+    
     Returns:
-        AppConfig: Configured application settings
+        AppConfig: A fully initialized and validated application configuration object.
     """
     config = AppConfig(config_file=config_file)
     return config
 
 
 def create_config_template(output_path: str = "config_template.yaml"):
-    """Create a configuration template file.
+    """
+    Create a YAML configuration template file containing a subset of AppConfig fields.
     
-    Args:
-        output_path: Path where to save the template
+    The template is populated from a default AppConfig instance (logging, gradio, llm, security, cache)
+    and written to the given output_path as YAML. If a file already exists at output_path it will be
+    overwritten. A short confirmation is printed after successful write.
+    
+    Parameters:
+        output_path (str): Path where the YAML template will be written (default: "config_template.yaml").
     """
     config = AppConfig()
     template_data = {
