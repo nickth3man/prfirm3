@@ -1,0 +1,372 @@
+# CodeRabbit Configuration for PocketFlow
+# https://docs.coderabbit.ai/getting-started/configure-coderabbit
+
+# Global settings
+global:
+  # Enable AI-powered code reviews
+  ai:
+    # Use GPT-4 for code analysis
+    provider: openai
+    model: gpt-4
+    # Enable context-aware reviews
+    context: true
+    # Include relevant documentation in reviews
+    include_docs: true
+    # Enable auto-reply for faster review cycles
+    auto_reply: true
+
+# Repository-specific settings
+repository:
+  # PocketFlow is a minimalist LLM framework
+  description: "A 100-line minimalist LLM framework for Agents, Task Decomposition, RAG, etc."
+  
+  # Key areas to focus on
+  focus_areas:
+    - "Core abstractions (Node, Flow, Shared Store)"
+    - "Design patterns (Agent, RAG, MapReduce, Workflow)"
+    - "Utility functions and external integrations"
+    - "Documentation and examples"
+    - "Code quality and maintainability"
+    - "Agentic coding principles and patterns"
+
+# Pull Request settings
+pull_request:
+  # Enable AI review for all PRs
+  review:
+    enabled: true
+    # Require AI review before merge
+    required: true
+    # Auto-approve if AI review passes and no critical issues
+    auto_approve: false
+    # Enable auto-reply for faster iteration
+    auto_reply: true
+    
+  # Review settings
+  settings:
+    # Focus on agentic coding principles
+    focus:
+      - "Separation of concerns (prep->exec->post pattern)"
+      - "Fault tolerance and retry mechanisms"
+      - "Shared store design and data contracts"
+      - "Flow orchestration and action-based transitions"
+      - "Utility function design and external integrations"
+      - "Modularity and composability patterns"
+      - "Error handling and graceful degradation"
+    
+    # Code quality checks
+    quality:
+      - "Node retry and fallback mechanisms"
+      - "Exception handling patterns"
+      - "Data validation and schema design"
+      - "Logging and debugging capabilities"
+      - "Performance considerations for LLM calls"
+      - "Memory efficiency and resource management"
+      - "Type safety and validation"
+    
+    # Documentation requirements
+    documentation:
+      - "Design documentation in docs/design.md"
+      - "Utility function documentation"
+      - "Example implementations"
+      - "API documentation and usage patterns"
+      - "Agentic patterns and best practices"
+
+# File-specific rules
+files:
+  # Core framework files
+  "pocketflow/__init__.py":
+    review:
+      focus:
+        - "Core abstraction implementation"
+        - "API design and interface consistency"
+        - "Error handling and edge cases"
+        - "Framework initialization patterns"
+    
+  # Node implementations
+  "nodes.py":
+    review:
+      focus:
+        - "Node lifecycle (prep->exec->post)"
+        - "Retry and fallback mechanisms"
+        - "Shared store interactions"
+        - "Action-based flow control"
+        - "State management and transitions"
+    
+  # Flow orchestration
+  "flow.py":
+    review:
+      focus:
+        - "Flow composition and nesting"
+        - "Action-based transitions"
+        - "Parameter passing and context management"
+        - "Error propagation and handling"
+        - "Workflow orchestration patterns"
+    
+  # Utility functions
+  "utils/*.py":
+    review:
+      focus:
+        - "External API integrations"
+        - "Error handling and retry logic"
+        - "Input/output validation"
+        - "Performance and caching considerations"
+        - "Reusability and modularity"
+    
+  # Documentation
+  "docs/**/*.md":
+    review:
+      focus:
+        - "Clarity and completeness"
+        - "Example quality and accuracy"
+        - "Design pattern explanations"
+        - "Best practices and guidelines"
+        - "Agentic coding concepts"
+    
+  # Examples and tests
+  "examples/**/*.py":
+    review:
+      focus:
+        - "Example completeness and correctness"
+        - "Best practice demonstration"
+        - "Error handling examples"
+        - "Performance considerations"
+        - "Real-world applicability"
+
+# Language-specific configurations
+languages:
+  python:
+    # Follow Python best practices
+    standards:
+      - "PEP 8 style guide"
+      - "Type hints and annotations"
+      - "Docstring documentation (Google style)"
+      - "Exception handling best practices"
+    
+    # Python-specific rules
+    rules:
+      - "Use context managers for resource handling"
+      - "Prefer list comprehensions over loops where appropriate"
+      - "Use dataclasses for structured data"
+      - "Implement proper __str__ and __repr__ methods"
+
+# Ignore patterns
+ignore:
+  # Generated files
+  - "**/*.pyc"
+  - "**/__pycache__/**"
+  - "**/.pytest_cache/**"
+  - "**/build/**"
+  - "**/dist/**"
+  - "**/*.egg-info/**"
+  
+  # Dependencies
+  - "**/node_modules/**"
+  - "**/venv/**"
+  - "**/.venv/**"
+  - "**/site-packages/**"
+  
+  # IDE and editor files
+  - "**/.vscode/**"
+  - "**/.idea/**"
+  - "**/*.swp"
+  - "**/*.swo"
+  - "**/.vscode/settings.json"
+  
+  # OS files
+  - "**/.DS_Store"
+  - "**/Thumbs.db"
+  
+  # Coverage and test reports
+  - "**/htmlcov/**"
+  - "**/.coverage"
+  - "**/coverage.xml"
+
+# AI review prompts
+ai_prompts:
+  # General code review
+  review: |
+    You are reviewing code for PocketFlow, a minimalist LLM framework focused on agentic coding patterns.
+    
+    **Core Principles to Evaluate:**
+    1. **Agentic Coding Patterns**: Does the code follow prep->exec->post lifecycle?
+    2. **Separation of Concerns**: Are data operations cleanly separated from compute logic?
+    3. **Fault Tolerance**: Are retry mechanisms and fallbacks properly implemented?
+    4. **Shared Store Design**: Is the data contract well-designed and consistent?
+    5. **Flow Orchestration**: Are action-based transitions clear and logical?
+    6. **Modularity**: Is the code composable and reusable?
+    
+    **Framework Architecture:**
+    - **Node**: prep->exec->post lifecycle with retry/fallback
+    - **Flow**: Action-based transitions with parameter passing
+    - **Shared Store**: Data communication contract between components
+    - **Utilities**: External integrations with proper error handling
+    
+    **Review Focus:**
+    - Code follows established patterns and conventions
+    - Error handling is comprehensive and graceful
+    - Performance considerations for LLM operations
+    - Documentation is clear and helpful
+    - Examples demonstrate best practices
+    
+    Provide specific, actionable feedback with code examples when possible.
+  
+  # Node-specific review
+  node_review: |
+    Review this Node implementation for PocketFlow agentic patterns:
+    
+    **Lifecycle Compliance:**
+    - Does it properly separate prep (data reading), exec (computation), and post (data writing)?
+    - Is the state management clear and predictable?
+    
+    **Fault Tolerance:**
+    - Are retry mechanisms appropriate for the operation type?
+    - Are there proper fallback mechanisms for failures?
+    - Is error context preserved for debugging?
+    
+    **Integration:**
+    - Is the shared store interaction clear and consistent?
+    - Does the action return value make sense for flow control?
+    - Are dependencies and side effects minimized?
+  
+  # Flow-specific review
+  flow_review: |
+    Review this Flow implementation for PocketFlow orchestration patterns:
+    
+    **Orchestration Design:**
+    - Are action-based transitions clear and logical?
+    - Is the flow composition maintainable and readable?
+    - Does the flow handle edge cases and error conditions?
+    
+    **Parameter Management:**
+    - Are parameters and context properly managed across nodes?
+    - Is data flow explicit and traceable?
+    - Are there clear contracts between flow components?
+    
+    **Error Handling:**
+    - Does error handling propagate appropriately?
+    - Are there proper recovery mechanisms?
+    - Is the flow design resilient to partial failures?
+
+# Auto-fix settings
+auto_fix:
+  # Enable automatic fixes for common issues
+  enabled: true
+  
+  # Fix categories
+  categories:
+    - "Code formatting and style (PEP 8)"
+    - "Import organization and sorting"
+    - "Simple syntax errors and typos"
+    - "Documentation formatting"
+    - "Type hint corrections"
+  
+  # Don't auto-fix complex logic changes
+  exclude:
+    - "Core business logic"
+    - "Complex error handling"
+    - "API design decisions"
+    - "Architecture changes"
+    - "Agentic pattern implementations"
+
+# Security settings
+security:
+  # Enable security scanning
+  enabled: true
+  
+  # Focus areas
+  focus:
+    - "API key handling and environment variables"
+    - "Input validation and sanitization"
+    - "External API security and rate limiting"
+    - "Data privacy and protection"
+    - "Secrets management in utilities"
+  
+  # Ignore false positives
+  ignore:
+    - "Test files with mock API keys"
+    - "Documentation examples with placeholder keys"
+    - "Development configuration files"
+
+# Performance settings
+performance:
+  # Enable performance analysis
+  enabled: true
+  
+  # Focus areas for LLM applications
+  focus:
+    - "LLM API call optimization and batching"
+    - "Async/parallel processing patterns"
+    - "Memory usage and garbage collection"
+    - "Caching strategies for expensive operations"
+    - "Rate limiting and backoff strategies"
+    - "Resource cleanup and context management"
+
+# Compliance and standards
+compliance:
+  # Code standards
+  standards:
+    - "PEP 8 Python style guide"
+    - "Type hints and annotations"
+    - "Google-style docstring documentation"
+    - "Error handling best practices"
+    - "Security best practices"
+  
+  # Framework-specific standards
+  framework:
+    - "PocketFlow design patterns"
+    - "Agentic coding principles"
+    - "Node lifecycle consistency"
+    - "Shared store contract adherence"
+    - "Flow orchestration patterns"
+    - "Utility function interfaces"
+
+# Integration settings
+integrations:
+  # GitHub integration
+  github:
+    # Auto-assign reviewers for specific file types
+    auto_assign:
+      "pocketflow/*.py": ["@core-team"]
+      "docs/*.md": ["@docs-team"]
+      "examples/*.py": ["@examples-team"]
+    
+    # Label management
+    labels:
+      - "agentic-pattern"
+      - "node-implementation"
+      - "flow-orchestration"
+      - "utility-function"
+      - "documentation"
+      - "performance"
+      - "security"
+
+# Custom rules for PocketFlow
+custom_rules:
+  # Agentic coding patterns
+  agentic_patterns:
+    - name: "Node lifecycle compliance"
+      description: "Ensure nodes follow prep->exec->post pattern"
+      severity: "error"
+      pattern: "class.*Node.*:"
+      
+    - name: "Action return validation"
+      description: "Ensure nodes return appropriate action values"
+      severity: "warning"
+      pattern: "return.*action"
+      
+    - name: "Shared store usage"
+      description: "Validate shared store interaction patterns"
+      severity: "info"
+      pattern: "shared_store\\."
+  
+  # Error handling patterns
+  error_handling:
+    - name: "Retry mechanism presence"
+      description: "Check for retry mechanisms in critical operations"
+      severity: "warning"
+      pattern: "(llm|api).*call"
+      
+    - name: "Fallback implementation"
+      description: "Ensure fallback mechanisms are implemented"
+      severity: "info"
+      pattern: "except.*:"
