@@ -49,13 +49,10 @@ def create_main_flow():
     # Wire the main pipeline
     engagement_manager >> brand_bible_ingest
     brand_bible_ingest >> voice_alignment
-    voice_alignment >> create_platform_formatting_flow()
-    
-    # TODO: Fix potential issue - create_platform_formatting_flow() is called twice
-    #       This might create duplicate flows or cause unexpected behavior
-    
-    # Connect formatting flow to content generation
+
+    # Create formatting flow once and connect it in the pipeline
     formatting_flow = create_platform_formatting_flow()
+    voice_alignment >> formatting_flow
     formatting_flow >> content_craftsman
     content_craftsman >> style_editor
     
@@ -92,12 +89,16 @@ def create_platform_formatting_flow():
             
             Returns a list of parameter dictionaries, one for each platform.
             """
-            # TODO: Validate the structure of shared["task_requirements"] to ensure
-            #       it contains the expected "platforms" key with a list value
+            # Basic validation of expected task_requirements structure
+            tr = shared.get("task_requirements")
+            if tr is None or not isinstance(tr, dict):
+                raise ValueError("shared['task_requirements'] must be a dict")
+            platforms = tr.get("platforms")
+            if not isinstance(platforms, list):
+                raise TypeError("task_requirements['platforms'] must be a list")
+
             # TODO: Add schema validation for platform configurations
             # TODO: Implement platform capability checking to ensure supported platforms
-            
-            platforms = shared.get("task_requirements", {}).get("platforms", [])
             if not platforms:
                 # Default to common platforms if none specified
                 platforms = ["twitter", "linkedin"]

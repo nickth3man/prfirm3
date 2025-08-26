@@ -142,8 +142,6 @@ class EngagementManagerNode(Node):
                 "topic_or_goal": "AI automation trends"
             }
         """
-        # TODO(Validation): Validate input shared state structure
-        # TODO(Types): Add type checking for shared dict contents
         # TODO(Schema): Implement shared state schema validation with Pydantic
         # TODO(Security): Add input sanitization to prevent injection attacks
         # TODO(Config): Implement default configuration loading from external config files
@@ -152,12 +150,28 @@ class EngagementManagerNode(Node):
         # TODO(Security): Add input size limits to prevent memory exhaustion
         # TODO(Reliability): Implement graceful degradation when optional inputs are missing
         # TODO(Pytest): Add pytest tests for prep() method including edge cases, empty inputs, and state normalization
-        # Ensure task_requirements exists
-        shared.setdefault("task_requirements", {
-            "platforms": [],
-            "intents_by_platform": {},
-            "topic_or_goal": "",
-        })
+
+        # Validate structure if task_requirements already exists
+        tr = shared.get("task_requirements")
+        if tr is not None:
+            if not isinstance(tr, dict):  # pragma: no cover - defensive
+                raise TypeError("shared['task_requirements'] must be a dict")
+            platforms = tr.get("platforms", [])
+            intents = tr.get("intents_by_platform", {})
+            topic = tr.get("topic_or_goal", "")
+            if not isinstance(platforms, list):
+                raise TypeError("task_requirements['platforms'] must be a list")
+            if not isinstance(intents, dict):
+                raise TypeError("task_requirements['intents_by_platform'] must be a dict")
+            if not isinstance(topic, str):
+                raise TypeError("task_requirements['topic_or_goal'] must be a string")
+        else:
+            # Ensure task_requirements exists with safe defaults
+            shared["task_requirements"] = {
+                "platforms": [],
+                "intents_by_platform": {},
+                "topic_or_goal": "",
+            }
         return shared["task_requirements"]
 
     # TODO(UX): EngagementManagerNode
@@ -1962,5 +1976,25 @@ class StyleComplianceNode(Node):
     # - TODO(Standards): Implement compliance rule integration with external standards
     # - TODO(Automation): Add support for compliance rule automation and orchestration
     # - TODO(Monitoring): Implement compliance rule monitoring and alerting
-    # - TODO(Analytics): Add support for compliance rule analytics and insights
-    # - TODO(Pytest): Add pytest tests for comprehensive compliance framework and edit-cycle integration
+# - TODO(Analytics): Add support for compliance rule analytics and insights
+# - TODO(Pytest): Add pytest tests for comprehensive compliance framework and edit-cycle integration
+
+
+class AgencyDirectorNode(Node):
+    """Terminal node that finalizes the pipeline.
+
+    For the purposes of the demo and tests this node simply logs the final
+    content pieces and terminates the flow without modifying the shared
+    state. In a full implementation this is where content would be delivered
+    to clients or persisted externally.
+    """
+
+    def prep(self, shared: Dict[str, Any]) -> Dict[str, Any]:
+        return shared.get("content_pieces", {})
+
+    def exec(self, content: Dict[str, Any]) -> Dict[str, Any]:  # pragma: no cover - trivial
+        return content
+
+    def post(self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, Any]) -> str:
+        log.info("Final content prepared for delivery: %s", list(exec_res.keys()))
+        return "done"

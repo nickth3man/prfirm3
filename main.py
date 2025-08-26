@@ -137,6 +137,10 @@ def validate_shared_store(shared: Dict[str, Any]) -> None:
     if not isinstance(platforms, list):
         raise TypeError("task_requirements['platforms'] must be a list")
 
+    topic = tr.get("topic_or_goal")
+    if topic is None or not isinstance(topic, str) or not topic.strip():
+        raise ValueError("task_requirements must include non-empty 'topic_or_goal'")
+
     # (function continues)
 
 
@@ -292,16 +296,16 @@ def create_gradio_interface() -> Any:
         TODO: Add input sanitization and security checks
         """
         
-        # TODO: Add validation for platforms_text format
-        # TODO: Support different delimiter options
-        # TODO: Add platform name normalization and validation
+        # Basic validation of platform list input
         platforms: List[str] = [p.strip() for p in platforms_text.split(",") if p.strip()]
-        
+        if not platforms:
+            raise ValueError("At least one platform must be specified")
+
         # TODO: Validate topic content and length
         # TODO: Add support for rich text input
         # TODO: Load brand bible from user uploads or database
         shared: Dict[str, Any] = {
-            "task_requirements": {"platforms": platforms or ["twitter"], "topic_or_goal": topic},
+            "task_requirements": {"platforms": platforms, "topic_or_goal": topic},
             "brand_bible": {"xml_raw": ""},
             "stream": None,
         }
