@@ -41,7 +41,15 @@ class SensitiveDataFilter(logging.Filter):
     }
     
     def filter(self, record):
-        """Filter sensitive data from log records."""
+        """
+        Sanitize sensitive information in a logging.LogRecord in-place and always allow the record.
+        
+        This filter inspects the record's message and formatting arguments and replaces or redacts sensitive values:
+        - If record.msg is a string, it is sanitized via _sanitize_string.
+        - If record.args is a dict, it is sanitized via _sanitize_dict.
+        - If record.args is a list or tuple, each element is sanitized (tuples are returned).
+        The method mutates the provided record and always returns True so it never prevents logging.
+        """
         if hasattr(record, 'msg') and isinstance(record.msg, str):
             record.msg = self._sanitize_string(record.msg)
         
@@ -54,7 +62,21 @@ class SensitiveDataFilter(logging.Filter):
         return True
     
     def _sanitize_string(self, text: str) -> str:
-        """Sanitize sensitive data in strings."""
+        """
+        Redact common sensitive data patterns from a text string.
+        
+        This method returns a sanitized copy of `text` where likely secrets are replaced with placeholders.
+        Patterns redacted include:
+        - long alphanumeric sequences (likely API keys),
+        - email addresses,
+        - HTTP/HTTPS URLs.
+        
+        Parameters:
+            text (str): Input string to sanitize.
+        
+        Returns:
+            str: Sanitized string with sensitive values replaced by placeholders like `[API_KEY]`, `[EMAIL]`, and `[URL]`.
+        """
         # Simple pattern matching for common sensitive data patterns
         import re
         
@@ -70,7 +92,20 @@ class SensitiveDataFilter(logging.Filter):
         return text
     
     def _sanitize_dict(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Sanitize sensitive data in dictionaries."""
+        """
+        Sanitize a mapping by redacting sensitive values and recursively sanitizing non-sensitive values.
+        
+        For each key/value pair in `data`:
+        - If the key is a string and contains any substring listed in `self.SENSITIVE_KEYS` (case-insensitive),
+          the value is replaced with the literal '[REDACTED]'.
+        - Otherwise the value is processed with `self._sanitize_value` (recursively sanitizes dicts, lists, tuples, and strings).
+        
+        Parameters:
+            data (Dict[str, Any]): Input dictionary to sanitize. Keys are preserved; values may be redacted or transformed.
+        
+        Returns:
+            Dict[str, Any]: A new dictionary with the same keys where sensitive values are replaced with '[REDACTED]' and other values sanitized.
+        """
         sanitized = {}
         for key, value in data.items():
             if isinstance(key, str) and any(sensitive in key.lower() for sensitive in self.SENSITIVE_KEYS):
@@ -80,7 +115,11 @@ class SensitiveDataFilter(logging.Filter):
         return sanitized
     
     def _sanitize_value(self, value: Any) -> Any:
-        """Sanitize sensitive data in any value type."""
+        """
+        Recursively sanitize a value by redacting sensitive information.
+        
+        Handles dicts (by delegating to _sanitize_dict), lists and tuples (recursively sanitizes each element, preserving the original sequence type), and strings (by delegating to _sanitize_string). Other value types are returned unchanged.
+        """
         if isinstance(value, dict):
             return self._sanitize_dict(value)
         elif isinstance(value, (list, tuple)):
@@ -94,7 +133,13 @@ class RequestCorrelationFilter(logging.Filter):
     """Add request correlation ID to log records."""
     
     def filter(self, record):
-        """Add request ID to log record."""
+        """
+        Attach a request correlation ID and an ISO-8601 UTC timestamp to the given log record.
+        
+        This filter sets record.request_id using get_request_id() (generating one if necessary)
+        and sets record.timestamp to the current UTC time in ISO 8601 format. Always returns True
+        so the record continues through the logging pipeline.
+        """
         record.request_id = get_request_id()
         record.timestamp = datetime.utcnow().isoformat()
         return True
@@ -136,7 +181,17 @@ class HumanReadableFormatter(logging.Formatter):
     """Human-readable formatter for development."""
     
     def format(self, record):
-        """Format log record for human reading."""
+        """
+        Format a LogRecord into a human-readable string.
+        
+        The output includes a timestamp (from record.timestamp if present, otherwise current UTC time),
+        the log level, logger name, request correlation id (record.request_id or "N/A"), and the formatted message.
+        For DEBUG level and lower the module name and line number are appended. If exception information is present
+        (record.exc_info) the formatted traceback is appended on a new line.
+        
+        Returns:
+            str: The formatted log string.
+        """
         timestamp = getattr(record, 'timestamp', datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
         request_id = getattr(record, 'request_id', 'N/A')
         
@@ -155,7 +210,12 @@ class HumanReadableFormatter(logging.Formatter):
 
 
 def get_request_id() -> str:
-    """Get current request ID or generate new one."""
+    """
+    Return the current request correlation ID, generating and storing a new UUID4 if none exists.
+    
+    Returns:
+        str: The request correlation ID for use in log records and request tracing.
+    """
     global _request_id
     if _request_id is None:
         _request_id = str(uuid.uuid4())
@@ -163,7 +223,17 @@ def get_request_id() -> str:
 
 
 def set_request_id(request_id: Optional[str] = None) -> str:
-    """Set request ID for correlation."""
+    """
+    Set the module-level request correlation ID.
+    
+    If `request_id` is provided, it becomes the current correlation ID; otherwise a new UUID4 string is generated, stored, and returned.
+    
+    Parameters:
+        request_id (Optional[str]): Specific request ID to set. If omitted or None, a new UUID4 string is created.
+    
+    Returns:
+        str: The request ID that was set.
+    """
     global _request_id
     if request_id is None:
         request_id = str(uuid.uuid4())
@@ -184,14 +254,28 @@ def setup_logging(
     max_size: int = 10 * 1024 * 1024,  # 10MB
     backup_count: int = 5
 ) -> None:
-    """Setup comprehensive logging configuration.
+    """
+    Configure the application's root logger with console (and optional rotating file) handlers, formatters, and filters.
     
-    Args:
-        level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        format_type: Log format ("json" or "human")
-        log_file: Optional file path for logging
-        max_size: Maximum log file size in bytes
-        backup_count: Number of backup files to keep
+    This sets the root logger level, removes existing handlers, and attaches:
+    - a console StreamHandler (stdout) and, if log_file is provided, a RotatingFileHandler.
+    - a SensitiveDataFilter to redact sensitive values from messages/arguments.
+    - a RequestCorrelationFilter to inject a per-request correlation ID and timestamp.
+    - either StructuredFormatter (JSON) when format_type == "json" or HumanReadableFormatter when "human".
+    
+    Parameters:
+        level: Logging level name; one of "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL".
+        format_type: Output format, either "json" for structured JSON logs or "human" for readable text.
+        log_file: Optional filesystem path to write logs. If provided, its parent directory will be created and a RotatingFileHandler will be used.
+        max_size: Maximum size in bytes for a single log file before rotation (applies only when log_file is set).
+        backup_count: Number of rotated backup files to keep (applies only when log_file is set).
+    
+    Raises:
+        ValueError: If `level` is not a supported level name or if `format_type` is not "json" or "human".
+    
+    Side effects:
+        - Modifies the root logger and may change logging behaviour across the process.
+        - May create directories on disk when a log_file is specified.
     """
     # Validate inputs
     valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -279,8 +363,26 @@ def get_logger(name: str) -> logging.Logger:
 
 
 def log_function_call(func):
-    """Decorator to log function calls with parameters and results."""
+    """
+    Decorator that logs a function's entry, successful completion, and failures.
+    
+    On call, logs a DEBUG entry with the function name, positional-argument count,
+    keyword-argument keys, and the current request correlation ID. On successful
+    return, logs a DEBUG message indicating completion (including request ID).
+    If the wrapped function raises an exception, logs an ERROR with the error
+    message, type, request ID, and traceback, then re-raises the exception.
+    
+    Returns the wrapped function's result unchanged.
+    """
     def wrapper(*args, **kwargs):
+        """
+        Wrapper for a decorated function that logs function entry, successful exit, and errors.
+        
+        This wrapper records a debug log when the function is called (including argument count and keyword names), a debug log on successful completion, and an error log with traceback and error metadata if the function raises. It attaches the current request correlation ID to all logs and re-raises any exception from the wrapped function.
+        
+        Returns:
+            The return value of the wrapped function.
+        """
         logger = logging.getLogger(func.__module__)
         request_id = get_request_id()
         
@@ -322,11 +424,14 @@ def log_function_call(func):
 
 
 def log_error_with_context(error: Exception, context: Dict[str, Any] = None):
-    """Log an error with additional context.
+    """
+    Log an exception with structured contextual information.
     
-    Args:
-        error: The exception to log
-        context: Additional context information
+    Logs the provided exception at ERROR level, including its type, message, the current request correlation ID, and any additional key/value pairs supplied via `context`. The traceback is logged (exc_info=True) so the exception stack is captured for diagnostics.
+    
+    Parameters:
+        error (Exception): The exception instance to log.
+        context (dict, optional): Additional context to include in the log record; keys are merged into the structured `extra` fields.
     """
     logger = logging.getLogger(__name__)
     extra = {
