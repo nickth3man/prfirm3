@@ -1,5 +1,7 @@
 <h1 align="center">Pocket Flow Project Template: Agentic Coding</h1>
 
+<!-- Verified repo access, lint, and PR creation capabilities -->
+
 <p align="center">
   <a href="https://github.com/The-Pocket/PocketFlow" target="_blank">
     <img 
