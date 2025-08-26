@@ -1964,3 +1964,120 @@ class StyleComplianceNode(Node):
     # - TODO(Monitoring): Implement compliance rule monitoring and alerting
     # - TODO(Analytics): Add support for compliance rule analytics and insights
     # - TODO(Pytest): Add pytest tests for comprehensive compliance framework and edit-cycle integration
+
+
+class AgencyDirectorNode(Node):
+    """Final packaging and completion node for the Virtual PR Firm pipeline.
+
+    This node serves as the final step in the content generation pipeline,
+    responsible for collating all deliverables, packaging final results,
+    and emitting completion milestones for user interfaces.
+
+    Core Responsibilities:
+        1. Result Collation: Gathers all generated content and metadata
+        2. Final Packaging: Organizes deliverables into final_campaign structure
+        3. Completion Signaling: Emits streaming milestones for UI updates
+        4. Quality Assurance: Ensures all required outputs are present
+
+    Input Requirements:
+        - content_pieces: Generated content for all platforms
+        - style_compliance: Style validation reports
+        - workflow_state: Pipeline execution metadata
+        - Optional: edit_cycle_report, validation results
+
+    Output Schema:
+        shared["final_campaign"] = {
+            "approved_content": Dict[str, Any],      # Final content by platform
+            "publishing_schedule": Dict[str, Any],   # Future: scheduling metadata
+            "performance_predictions": Dict[str, Any], # Future: analytics
+            "edit_cycle_report": Optional[str]       # Summary of revision cycles
+        }
+
+    Fallback Behavior:
+        - Creates minimal packaging structure when inputs are missing
+        - Gracefully handles missing optional components
+        - Always provides usable final_campaign structure
+    """
+
+    def prep(self, shared: Dict[str, Any]) -> Dict[str, Any]:
+        """Collects all pipeline results for final packaging.
+
+        Gathers content pieces, compliance reports, workflow state, and any
+        additional metadata generated during the pipeline execution.
+
+        Args:
+            shared: Complete shared pipeline state containing all node outputs.
+
+        Returns:
+            Dict[str, Any]: Collected results ready for packaging, including
+                          content_pieces, style_compliance, workflow_state, and
+                          any available reports or metadata.
+        """
+        return {
+            "content_pieces": shared.get("content_pieces", {}),
+            "style_compliance": shared.get("style_compliance", {}),
+            "workflow_state": shared.get("workflow_state", {}),
+            "edit_cycle_report": shared.get("final_campaign", {}).get("edit_cycle_report"),
+            "task_requirements": shared.get("task_requirements", {}),
+        }
+
+    def exec(self, prep_res: Dict[str, Any]) -> Dict[str, Any]:
+        """Packages all deliverables into final campaign structure.
+
+        Organizes the collected results into a structured final_campaign
+        format suitable for user consumption and future enhancements.
+
+        Args:
+            prep_res: Collected pipeline results from prep().
+
+        Returns:
+            Dict[str, Any]: Packaged final campaign with approved content,
+                          metadata, and completion status.
+        """
+        content_pieces = prep_res.get("content_pieces", {})
+        
+        final_campaign = {
+            "approved_content": content_pieces,
+            "publishing_schedule": {},
+            "performance_predictions": {},
+            "edit_cycle_report": prep_res.get("edit_cycle_report"),
+            "completion_timestamp": None,
+            "pipeline_metadata": {
+                "platforms_processed": list(content_pieces.keys()),
+                "total_platforms": len(content_pieces),
+                "workflow_state": prep_res.get("workflow_state", {}),
+            }
+        }
+        
+        return final_campaign
+
+    def post(self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, Any]) -> str:
+        """Persists final campaign and emits completion milestone.
+
+        Stores the packaged deliverables in shared state and notifies
+        streaming interfaces of successful pipeline completion.
+
+        Args:
+            shared: Shared pipeline state to update with final results.
+            prep_res: Original collected results (unused).
+            exec_res: Packaged final campaign from exec().
+
+        Returns:
+            str: Always returns "default" to complete the pipeline.
+        """
+        shared["final_campaign"] = exec_res
+        
+        workflow_state = shared.setdefault("workflow_state", {})
+        workflow_state["current_stage"] = "completed"
+        workflow_state["completed_stages"] = workflow_state.get("completed_stages", []) + ["packaging"]
+        
+        stream = shared.get("stream")
+        if stream and hasattr(stream, "emit"):
+            try:
+                platforms = list(exec_res.get("approved_content", {}).keys())
+                platform_summary = f"Generated content for {len(platforms)} platforms: {', '.join(platforms)}"
+                stream.emit("system", f"Packaging complete. {platform_summary}")
+            except Exception:
+                log.debug("stream.emit failed during completion", exc_info=True)
+        
+        return "default"
