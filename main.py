@@ -136,8 +136,19 @@ def validate_shared_store(shared: Dict[str, Any]) -> None:
         raise ValueError("task_requirements must include 'platforms'")
     if not isinstance(platforms, list):
         raise TypeError("task_requirements['platforms'] must be a list")
+    topic = tr.get("topic_or_goal", "")
+    if not isinstance(topic, str):
+        raise TypeError("task_requirements['topic_or_goal'] must be a str")
+    if topic == "":
+        raise ValueError("task_requirements['topic_or_goal'] cannot be empty")
 
-    # (function continues)
+    brand = shared.get("brand_bible")
+    if brand is None or not isinstance(brand, dict):
+        raise ValueError("shared['brand_bible'] must be a dict")
+    xml_raw = brand.get("xml_raw", "")
+    if not isinstance(xml_raw, str):
+        raise TypeError("brand_bible['xml_raw'] must be a str")
+
 
 
 def create_gradio_interface() -> Any:

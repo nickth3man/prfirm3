@@ -142,9 +142,6 @@ class EngagementManagerNode(Node):
                 "topic_or_goal": "AI automation trends"
             }
         """
-        # TODO(Validation): Validate input shared state structure
-        # TODO(Types): Add type checking for shared dict contents
-        # TODO(Schema): Implement shared state schema validation with Pydantic
         # TODO(Security): Add input sanitization to prevent injection attacks
         # TODO(Config): Implement default configuration loading from external config files
         # TODO(Environment): Add support for environment-specific defaults (dev/staging/prod)
@@ -152,13 +149,31 @@ class EngagementManagerNode(Node):
         # TODO(Security): Add input size limits to prevent memory exhaustion
         # TODO(Reliability): Implement graceful degradation when optional inputs are missing
         # TODO(Pytest): Add pytest tests for prep() method including edge cases, empty inputs, and state normalization
-        # Ensure task_requirements exists
-        shared.setdefault("task_requirements", {
-            "platforms": [],
-            "intents_by_platform": {},
-            "topic_or_goal": "",
-        })
-        return shared["task_requirements"]
+
+        # Validate shared structure and normalise defaults
+        if not isinstance(shared, dict):
+            raise TypeError("shared must be a dict")
+
+        task_req = shared.setdefault("task_requirements", {})
+        if not isinstance(task_req, dict):
+            raise TypeError("shared['task_requirements'] must be a dict")
+
+        platforms = task_req.get("platforms", [])
+        if not isinstance(platforms, list):
+            raise TypeError("task_requirements['platforms'] must be a list")
+        task_req["platforms"] = platforms
+
+        intents = task_req.get("intents_by_platform", {})
+        if not isinstance(intents, dict):
+            raise TypeError("task_requirements['intents_by_platform'] must be a dict")
+        task_req["intents_by_platform"] = intents
+
+        topic = task_req.get("topic_or_goal", "")
+        if not isinstance(topic, str):
+            raise TypeError("task_requirements['topic_or_goal'] must be a str")
+        task_req["topic_or_goal"] = topic
+
+        return task_req
 
     # TODO(UX): EngagementManagerNode
     # - Implement interactive behavior (CLI / Gradio hooks) to collect missing inputs
@@ -1964,3 +1979,17 @@ class StyleComplianceNode(Node):
     # - TODO(Monitoring): Implement compliance rule monitoring and alerting
     # - TODO(Analytics): Add support for compliance rule analytics and insights
     # - TODO(Pytest): Add pytest tests for comprehensive compliance framework and edit-cycle integration
+
+
+class AgencyDirectorNode(Node):
+    """Terminal node that finalizes the workflow."""
+
+    def prep(self, shared: Dict[str, Any]) -> Dict[str, Any]:
+        return shared.get("content_pieces", {})
+
+    def exec(self, prep_res: Dict[str, Any]) -> Dict[str, Any]:
+        return prep_res
+
+    def post(self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, Any]) -> None:
+        # Final node simply ends the flow; results already in shared
+        return None
