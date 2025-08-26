@@ -17,6 +17,7 @@ from nodes import (
     AgencyDirectorNode,
 )
 import logging
+from config import get_node_config
 
 log = logging.getLogger(__name__)
 
@@ -29,33 +30,43 @@ def create_main_flow():
     Returns:
         Flow: The complete orchestrated flow ready for execution
     """
-    # TODO: Evaluate the necessity of max_retries and wait parameters for each node.
-    #       Consider if default values are sufficient or if customization is required.
-    # TODO: Add configuration management for node parameters to make them configurable
-    #       without code changes (e.g., via config file or environment variables)
     
-    # Initialize all nodes
-    engagement_manager = EngagementManagerNode(max_retries=2)
-    brand_bible_ingest = BrandBibleIngestNode(max_retries=2)
-    voice_alignment = VoiceAlignmentNode(max_retries=2)
-    content_craftsman = ContentCraftsmanNode(max_retries=3, wait=2)
-    style_editor = StyleEditorNode(max_retries=3, wait=1)
-    style_compliance = StyleComplianceNode(max_retries=2)
-    agency_director = AgencyDirectorNode()
+    # Initialize all nodes with configuration
+    log.info("Initializing nodes with configuration...")
+    
+    engagement_config = get_node_config("engagement_manager")
+    engagement_manager = EngagementManagerNode(**engagement_config)
+    
+    bible_config = get_node_config("brand_bible_ingest")
+    brand_bible_ingest = BrandBibleIngestNode(**bible_config)
+    
+    voice_config = get_node_config("voice_alignment")
+    voice_alignment = VoiceAlignmentNode(**voice_config)
+    
+    craftsman_config = get_node_config("content_craftsman")
+    content_craftsman = ContentCraftsmanNode(**craftsman_config)
+    
+    editor_config = get_node_config("style_editor")
+    style_editor = StyleEditorNode(**editor_config)
+    
+    compliance_config = get_node_config("style_compliance")
+    style_compliance = StyleComplianceNode(**compliance_config)
+    
+    director_config = get_node_config("agency_director")
+    agency_director = AgencyDirectorNode(**director_config)
     
     # TODO: Add error handling and logging for flow construction failures
     # TODO: Consider implementing flow validation to ensure all connections are valid
     
+    # Create platform formatting flow once to reuse
+    formatting_flow = create_platform_formatting_flow()
+    
     # Wire the main pipeline
     engagement_manager >> brand_bible_ingest
     brand_bible_ingest >> voice_alignment
-    voice_alignment >> create_platform_formatting_flow()
-    
-    # TODO: Fix potential issue - create_platform_formatting_flow() is called twice
-    #       This might create duplicate flows or cause unexpected behavior
+    voice_alignment >> formatting_flow
     
     # Connect formatting flow to content generation
-    formatting_flow = create_platform_formatting_flow()
     formatting_flow >> content_craftsman
     content_craftsman >> style_editor
     
@@ -71,6 +82,7 @@ def create_main_flow():
     # Create the main flow starting from engagement manager
     main_flow = Flow(start=engagement_manager)
     
+    log.info("Main flow created successfully")
     return main_flow
 
 
