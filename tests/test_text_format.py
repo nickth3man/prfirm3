@@ -1,5 +1,5 @@
 """
-Test text format logging.
+Test text format logging (used by comprehensive test suite).
 """
 import os
 

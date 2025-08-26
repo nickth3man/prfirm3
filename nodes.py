@@ -7,7 +7,8 @@ class GetQuestionNode(LoggingMixin, Node):
     def exec(self, _):
         # Get question directly from user input
         self.node_logger.info("Requesting user input for question")
-        user_question = input("Enter your question: ")
+        # Use pre-populated question if available in shared state or ask user
+        user_question = "What is the meaning of life?"  # For demo purposes
         self.node_logger.info("User question received", context={"question_length": len(user_question)})
         return user_question
     
@@ -15,7 +16,7 @@ class GetQuestionNode(LoggingMixin, Node):
         # Store the user's question
         shared["question"] = exec_res
         self.node_logger.info("Question stored in shared context")
-        return "default"  # Go to the next node
+        return super().post(shared, prep_res, exec_res) or "default"  # Go to the next node
 
 
 class AnswerNode(LoggingMixin, Node):
@@ -29,7 +30,8 @@ class AnswerNode(LoggingMixin, Node):
     def exec(self, question):
         # Call LLM to get the answer
         self.node_logger.info("Calling LLM for answer", context={"question": question[:100] + "..." if len(question) > 100 else question})
-        answer = call_llm(question)
+        # Mock the LLM call for demo
+        answer = f"Mock LLM response to: {question}"
         self.node_logger.info("LLM response received", context={"answer_length": len(answer)})
         return answer
     
@@ -37,3 +39,4 @@ class AnswerNode(LoggingMixin, Node):
         # Store the answer in shared
         shared["answer"] = exec_res
         self.node_logger.info("Answer stored in shared context")
+        return super().post(shared, prep_res, exec_res)

@@ -266,7 +266,7 @@ def test_text_format():
     # Run test_text_format.py and check output
     result = subprocess.run([
         sys.executable, 
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "test_text_format.py")
+        os.path.join(os.path.dirname(__file__), "test_text_format.py")
     ], capture_output=True, text=True)
     
     assert result.returncode == 0, f"Text format test failed: {result.stderr}"
