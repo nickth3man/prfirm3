@@ -1,0 +1,129 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+<FiveWhysAnalysis>
+  <Introduction>
+    Use the "Five Whys" root cause analysis technique to deeply understand problems.
+  </Introduction>
+
+  <Process>
+    <Step number="1" name="Define the Problem">
+      <Description>Clearly state the issue or symptom</Description>
+      <Action>Write down the problem in specific, observable terms</Action>
+      <Action>Avoid assumptions or blame</Action>
+      <Action>Focus on what actually happened</Action>
+    </Step>
+
+    <Step number="2" name="Ask 'Why?' Five Times">
+      <Description>Drill down through layers of causation</Description>
+      <Question iteration="1">Why did this problem occur? → <Answer>Answer 1</Answer></Question>
+      <Question iteration="2">Why did Answer 1 happen? → <Answer>Answer 2</Answer></Question>
+      <Question iteration="3">Why did Answer 2 happen? → <Answer>Answer 3</Answer></Question>
+      <Question iteration="4">Why did Answer 3 happen? → <Answer>Answer 4</Answer></Question>
+      <Question iteration="5">Why did Answer 4 happen? → <Answer>Answer 5 (Root Cause)</Answer></Question>
+      <Note>Continue asking "why" until you reach a controllable root cause</Note>
+    </Step>
+
+    <Step number="3" name="Validate Root Cause">
+      <Description>Ensure the analysis is sound and complete</Description>
+      <Action>Verify the logical chain from problem to root cause</Action>
+      <Action>Check if addressing root cause prevents recurrence</Action>
+      <Action>Consider multiple root causes if applicable</Action>
+      <Action>Test the logic: if root cause is fixed, would problem disappear?</Action>
+    </Step>
+
+    <Step number="4" name="Develop Solutions">
+      <Description>Create actionable solutions targeting the root cause</Description>
+      <Action>Address the root cause, not just symptoms</Action>
+      <Action>Create preventive measures</Action>
+      <Action>Consider systemic improvements</Action>
+      <Action>Define success metrics and monitoring</Action>
+    </Step>
+
+    <Step number="5" name="Implement and Monitor">
+      <Description>Execute solutions and track effectiveness</Description>
+      <Action>Create implementation plan with timeline</Action>
+      <Action>Assign ownership and responsibilities</Action>
+      <Action>Monitor results to ensure problem doesn't recur</Action>
+      <Action>Document lessons learned</Action>
+    </Step>
+  </Process>
+
+  <Example>
+    <Problem>Application crashes when processing large files</Problem>
+    <Analysis>
+      <Why iteration="1">The application runs out of memory</Why>
+      <Why iteration="2">It loads entire file into memory at once</Why>
+      <Why iteration="3">The file parser wasn't designed for streaming</Why>
+      <Why iteration="4">Initial requirements only specified small files</Why>
+      <Why iteration="5">Requirements gathering didn't consider future growth</Why>
+    </Analysis>
+    <RootCause>Incomplete requirements gathering process</RootCause>
+    <Solution>Implement streaming parser and improve requirements process</Solution>
+  </Example>
+
+  <Example>
+    <Problem>Database queries are running slowly</Problem>
+    <Analysis>
+      <Why iteration="1">The queries are performing full table scans</Why>
+      <Why iteration="2">There are no proper indexes on the tables</Why>
+      <Why iteration="3">The database schema wasn't optimized for these queries</Why>
+      <Why iteration="4">Performance testing wasn't done during development</Why>
+      <Why iteration="5">The team prioritized feature development over performance</Why>
+    </Analysis>
+    <RootCause>Lack of performance considerations in development process</RootCause>
+    <Solution>Add proper indexes and implement performance testing in CI/CD</Solution>
+  </Example>
+
+  <Example>
+    <Problem>Users frequently enter invalid data in forms</Problem>
+    <Analysis>
+      <Why iteration="1">The form validation is too permissive</Why>
+      <Why iteration="2">The validation rules weren't strict enough</Why>
+      <Why iteration="3">The requirements didn't specify all edge cases</Why>
+      <Why iteration="4">User testing didn't cover all scenarios</Why>
+      <Why iteration="5">The UX design process didn't include error case analysis</Why>
+    </Analysis>
+    <RootCause>Incomplete UX design process for error handling</RootCause>
+    <Solution>Enhance form validation and improve UX design process</Solution>
+  </Example>
+
+  <Example>
+    <Problem>Deployment pipeline fails intermittently</Problem>
+    <Analysis>
+      <Why iteration="1">Build server runs out of disk space randomly</Why>
+      <Why iteration="2">Old build artifacts aren't being cleaned up</Why>
+      <Why iteration="3">The cleanup script has a bug and doesn't run properly</Why>
+      <Why iteration="4">The script wasn't tested in the production environment</Why>
+      <Why iteration="5">Testing process doesn't include infrastructure validation</Why>
+    </Analysis>
+    <RootCause>Inadequate testing process for infrastructure components</RootCause>
+    <Solution>Fix cleanup script and add infrastructure testing to CI/CD pipeline</Solution>
+  </Example>
+
+  <Example>
+    <Problem>Customer support tickets are taking too long to resolve</Problem>
+    <Analysis>
+      <Why iteration="1">Support agents don't have enough information to resolve issues quickly</Why>
+      <Why iteration="2">The knowledge base is outdated and incomplete</Why>
+      <Why iteration="3">Product updates aren't being communicated to support team</Why>
+      <Why iteration="4">There's no process for keeping support informed of changes</Why>
+      <Why iteration="5">Cross-team communication processes weren't established</Why>
+    </Analysis>
+    <RootCause>Lack of structured cross-team communication processes</RootCause>
+    <Solution>Establish regular communication channels and update knowledge base process</Solution>
+  </Example>
+
+  <BestPractices>
+    <Practice>Focus on process, not people</Practice>
+    <Practice>Look for systemic issues</Practice>
+    <Practice>Document the analysis thoroughly</Practice>
+    <Practice>Involve relevant stakeholders in the process</Practice>
+    <Practice>Test solutions address root cause</Practice>
+    <Practice>Ask "why" until you reach something you can control</Practice>
+    <Practice>Be prepared to go beyond five whys if needed</Practice>
+    <Practice>Consider multiple contributing factors</Practice>
+  </BestPractices>
+</FiveWhysAnalysis>

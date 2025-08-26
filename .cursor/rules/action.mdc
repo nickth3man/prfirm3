@@ -1,0 +1,92 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+<methodology>
+  <title>Software Development Methodology</title>
+  <description>A comprehensive framework for delivering high-quality software through structured phases, emphasizing architectural thinking, quality practices, and measurable outcomes.</description>
+
+  <process>
+    <phase id="1" name="Discovery & Requirements">
+      <item><strong>Stakeholder alignment</strong>: Conduct discovery sessions to understand business objectives and constraints</item>
+      <item><strong>Requirements specification</strong>: Document functional and non-functional requirements with acceptance criteria</item>
+      <item><strong>Success metrics</strong>: Define measurable outcomes, KPIs, and definition of done</item>
+      <item><strong>Risk assessment</strong>: Identify technical and business risks with mitigation strategies</item>
+      <item><strong>Dependency mapping</strong>: Document external systems, APIs, and third-party integrations</item>
+    </phase>
+
+    <phase id="2" name="Architecture & Design">
+      <item><strong>System architecture</strong>: Design scalable, maintainable system with clear component boundaries</item>
+      <item><strong>Technology selection</strong>: Evaluate and select tech stack based on requirements and team capabilities</item>
+      <item><strong>Data modeling</strong>: Design schemas, storage patterns, and data flow architecture</item>
+      <item><strong>API design</strong>: Specify interfaces, contracts, and integration patterns</item>
+      <item><strong>Security architecture</strong>: Plan authentication, authorization, and data protection strategies</item>
+    </phase>
+
+    <phase id="3" name="Solution Validation">
+      <assessment>Evaluate proposed solutions against key criteria:</assessment>
+      <item><strong>Performance viability</strong>: Latency, throughput, scalability, and resource efficiency</item>
+      <item><strong>Maintainability</strong>: Code clarity, modularity, testability, and SOLID principles adherence</item>
+      <item><strong>Scalability potential</strong>: Horizontal and vertical scaling strategies</item>
+      <item><strong>Security robustness</strong>: Threat modeling, vulnerability assessment, compliance requirements</item>
+      <item><strong>Operational readiness</strong>: Monitoring, logging, debugging, and troubleshooting capabilities</item>
+    </phase>
+
+    <phase id="4" name="Implementation Strategy">
+      <item><strong>Sprint planning</strong>: Break down features into deliverable increments with clear objectives</item>
+      <item><strong>Development workflow</strong>: Establish branching strategy, code review process, and CI/CD pipeline</item>
+      <item><strong>Quality gates</strong>: Define automated testing strategy at unit, integration, and system levels</item>
+      <item><strong>Risk mitigation</strong>: Plan for technical spikes, proof of concepts, and validation checkpoints</item>
+      <item><strong>Deployment strategy</strong>: Design rollout plan with rollback procedures and monitoring</item>
+    </phase>
+
+    <phase id="5" name="Development Execution">
+      <item><strong>Test-driven development</strong>: Write tests first to define behavior and ensure quality</item>
+      <item><strong>Incremental delivery</strong>: Implement vertical slices delivering end-to-end value</item>
+      <item><strong>Code quality practices</strong>: Enforce standards through linting, formatting, and peer review</item>
+      <item><strong>Continuous integration</strong>: Automated build, test, and validation pipeline</item>
+      <item><strong>Performance optimization</strong>: Profile-guided improvements and benchmark validation</item>
+      <item><strong>Documentation</strong>: Maintain living documentation and architectural decision records</item>
+    </phase>
+
+    <phase id="6" name="Quality Assurance">
+      <item><strong>Automated testing</strong>: Comprehensive unit, integration, and end-to-end test coverage</item>
+      <item><strong>Security testing</strong>: Vulnerability scanning, penetration testing, and security reviews</item>
+      <item><strong>Performance testing</strong>: Load testing, stress testing, and capacity planning</item>
+      <item><strong>User acceptance testing</strong>: Stakeholder validation of business requirements</item>
+      <item><strong>Operational validation</strong>: Deployment testing, monitoring setup, and incident response</item>
+    </phase>
+  </process>
+
+  <principles>
+    <principle><strong>Quality first</strong>: Prioritize sustainable code quality over short-term velocity</principle>
+    <principle><strong>Iterative refinement</strong>: Embrace feedback loops and continuous improvement</principle>
+    <principle><strong>Risk management</strong>: Address high-risk items early in the development cycle</principle>
+    <principle><strong>Stakeholder collaboration</strong>: Maintain regular communication and alignment</principle>
+    <principle><strong>Technical excellence</strong>: Invest in tooling, automation, and engineering practices</principle>
+  </principles>
+
+  <checklist type="readiness">
+    <item status="required">Requirements documented and stakeholder-approved</item>
+    <item status="required">Architecture design peer-reviewed and validated</item>
+    <item status="required">Technology stack selected with technical justification</item>
+    <item status="required">Development environment and toolchain configured</item>
+    <item status="required">Test automation framework established</item>
+    <item status="required">Security requirements and compliance needs identified</item>
+    <item status="required">Deployment pipeline and monitoring strategy defined</item>
+  </checklist>
+
+  <checklist type="delivery">
+    <item status="required">All acceptance criteria met and validated</item>
+    <item status="required">Comprehensive test coverage achieved (unit, integration, e2e)</item>
+    <item status="required">Security controls implemented and verified</item>
+    <item status="required">Performance benchmarks met under expected load</item>
+    <item status="required">Error handling and resilience patterns implemented</item>
+    <item status="required">Monitoring, logging, and alerting operational</item>
+    <item status="required">Documentation complete and current</item>
+    <item status="required">Deployment procedures tested and validated</item>
+    <item status="required">Rollback procedures verified and documented</item>
+    <item status="required">Knowledge transfer and training completed</item>
+  </checklist>
+</methodology>
