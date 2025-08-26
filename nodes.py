@@ -153,12 +153,34 @@ class EngagementManagerNode(Node):
         # TODO(Reliability): Implement graceful degradation when optional inputs are missing
         # TODO(Pytest): Add pytest tests for prep() method including edge cases, empty inputs, and state normalization
         # Ensure task_requirements exists
-        shared.setdefault("task_requirements", {
-            "platforms": [],
-            "intents_by_platform": {},
-            "topic_or_goal": "",
-        })
-        return shared["task_requirements"]
+        shared.setdefault(
+            "task_requirements",
+            {
+                "platforms": [],
+                "intents_by_platform": {},
+                "topic_or_goal": "",
+            },
+        )
+
+        # Basic structural validation with defensive fallbacks
+        tr = shared["task_requirements"]
+        platforms = tr.get("platforms")
+        if not isinstance(platforms, list):
+            log.warning("task_requirements['platforms'] must be a list; resetting")
+            tr["platforms"] = []
+        else:
+            # Ensure all entries are strings to avoid downstream crashes
+            tr["platforms"] = [p for p in platforms if isinstance(p, str)]
+
+        if not isinstance(tr.get("intents_by_platform"), dict):
+            log.warning("task_requirements['intents_by_platform'] must be a dict; resetting")
+            tr["intents_by_platform"] = {}
+
+        if not isinstance(tr.get("topic_or_goal"), str):
+            log.warning("task_requirements['topic_or_goal'] must be a string; resetting")
+            tr["topic_or_goal"] = ""
+
+        return tr
 
     # TODO(UX): EngagementManagerNode
     # - Implement interactive behavior (CLI / Gradio hooks) to collect missing inputs
@@ -1964,3 +1986,16 @@ class StyleComplianceNode(Node):
     # - TODO(Monitoring): Implement compliance rule monitoring and alerting
     # - TODO(Analytics): Add support for compliance rule analytics and insights
     # - TODO(Pytest): Add pytest tests for comprehensive compliance framework and edit-cycle integration
+
+
+class AgencyDirectorNode(Node):
+    """Simple terminal node that currently performs no additional work."""
+
+    def prep(self, shared: Dict[str, Any]) -> None:  # pragma: no cover - trivial
+        return None
+
+    def exec(self, prep_res: None) -> None:  # pragma: no cover - trivial
+        return None
+
+    def post(self, shared: Dict[str, Any], prep_res: None, exec_res: None) -> str:
+        return "default"

@@ -40,17 +40,20 @@ if TYPE_CHECKING:
 
 try:
     import gradio as gr
-except Exception:
+except Exception:  # pragma: no cover - gradio is optional
     gr = None  # type: Optional[Any]
 
 import logging
+import os
 
 # Module logger
 logger = logging.getLogger(__name__)
 if not logging.getLogger().handlers:
-    logging.basicConfig(level=logging.INFO)
-
-# TODO: Add proper logging configuration
+    level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    )
 # TODO: Import configuration management utilities
 # TODO: Import validation utilities
 # TODO: Import error handling decorators
@@ -137,7 +140,30 @@ def validate_shared_store(shared: Dict[str, Any]) -> None:
     if not isinstance(platforms, list):
         raise TypeError("task_requirements['platforms'] must be a list")
 
-    # (function continues)
+    if not all(isinstance(p, str) for p in platforms):
+        raise TypeError("all platform names must be strings")
+
+    topic = tr.get("topic_or_goal")
+    if topic is None:
+        raise ValueError("task_requirements must include 'topic_or_goal'")
+    if not isinstance(topic, str):
+        raise TypeError("task_requirements['topic_or_goal'] must be a string")
+
+    intents = tr.get("intents_by_platform")
+    if intents is None or not isinstance(intents, dict):
+        raise TypeError("task_requirements['intents_by_platform'] must be a dict")
+
+    bb = shared.get("brand_bible")
+    if bb is None or not isinstance(bb, dict):
+        raise ValueError("shared['brand_bible'] must be a dict")
+    if "xml_raw" not in bb:
+        raise ValueError("brand_bible must include 'xml_raw'")
+
+    stream = shared.get("stream")
+    if stream is not None and not hasattr(stream, "emit"):
+        raise TypeError("shared['stream'] must be None or provide an 'emit' method")
+
+    return None
 
 
 def create_gradio_interface() -> Any:
