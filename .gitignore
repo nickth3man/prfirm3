@@ -18,6 +18,7 @@ __pycache__/
 .env.development
 .env.test
 .env.production
+.env.example
 
 # IDE - VSCode
 .vscode/*
