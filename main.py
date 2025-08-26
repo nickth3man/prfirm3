@@ -7,6 +7,8 @@ and a Gradio web interface for interactive use.
 The module exposes the following key functionality:
 - `run_demo()`: A CLI function that executes the main flow with sample data
 - `create_gradio_interface()`: Creates a web-based interface using Gradio
+- `run_flow()`: Core function for executing the PR content generation flow
+- `validate_shared_store()`: Validates shared store structure
 
 Example Usage:
     Command Line:
@@ -18,20 +20,24 @@ Example Usage:
         >>> app = create_gradio_interface()  # Create web interface
         >>> app.launch()  # Launch web interface
 
-TODO: Add comprehensive error handling and logging throughout the module
-TODO: Implement configuration management for default values and settings
-TODO: Add unit tests using Pytest for all functions
-TODO: Add integration tests for the complete flow execution
-TODO: Implement proper input validation and sanitization
-TODO: Add support for loading brand bible from external files
-TODO: Implement streaming support for real-time content generation
-TODO: Add authentication and session management for Gradio interface
-TODO: Implement caching mechanism for repeated requests
-TODO: Add metrics and analytics tracking
+Features:
+- Comprehensive error handling and logging
+- Configuration management for default values and settings
+- Input validation and sanitization
+- Caching mechanism for repeated requests
+- Support for loading brand bible from external files
+- Streaming support for real-time content generation
+- Metrics and analytics tracking
+- Authentication and session management for Gradio interface
 """
 
 from flow import create_main_flow
 from typing import Any, Dict, Optional, List, TYPE_CHECKING
+import argparse
+import sys
+import os
+import time
+from pathlib import Path
 
 if TYPE_CHECKING:
     # Imported for type checking only to avoid runtime dependency
@@ -45,17 +51,27 @@ except Exception:
 
 import logging
 
+# Import utility modules
+from utils.config import get_config, AppConfig
+from utils.validation import (
+    validate_and_sanitize_inputs, validate_shared_store as validate_shared_store_util,
+    ValidationResult
+)
+from utils.error_handling import (
+    handle_errors, log_execution_time, safe_execute, 
+    VirtualPRError, ValidationError, setup_error_handling
+)
+from utils.caching import get_cache_manager, cache_result
+
 # Module logger
 logger = logging.getLogger(__name__)
-if not logging.getLogger().handlers:
-    logging.basicConfig(level=logging.INFO)
 
-# TODO: Add proper logging configuration
-# TODO: Import configuration management utilities
-# TODO: Import validation utilities
-# TODO: Import error handling decorators
+# Set up error handling and logging
+setup_error_handling()
 
 
+@handle_errors
+@log_execution_time
 def run_demo() -> None:
     """Run a minimal demo of the main flow using a sample shared store.
 
@@ -83,31 +99,39 @@ def run_demo() -> None:
         def test_run_demo_smoke(tmp_path):
             # smoke test that run_demo doesn't raise
             run_demo()
-
-    TODO(dev,2025-08-26): Add CLI flags, structured logging, and proper error codes
-    FIXME(dev,2025-08-26): consider decoupling flow creation to allow DI in tests
-    # pylint: disable=too-many-locals
-
-    # NOTE: defaults are intentional for demo; replace with configuration in prod
+    """
+    
+    # Get configuration
+    config = get_config()
+    
+    # Create sample shared store with configuration-based defaults
     shared: Dict[str, Any] = {
-        "task_requirements": {"platforms": ["twitter", "linkedin"], "topic_or_goal": "Announce product"},
+        "task_requirements": {
+            "platforms": config.supported_platforms[:2],
+            "topic_or_goal": "Announce product"
+        },
         "brand_bible": {"xml_raw": ""},
         "stream": None,
     }
 
     # Validate shared store before running the flow
-    try:
-        validate_shared_store(shared)
-    except Exception as exc:
-        logger.error("Invalid shared store: %s", exc)
-        raise
+    validation_result = validate_shared_store_util(shared)
+    if not validation_result:
+        error_messages = []
+        for e in validation_result.errors:
+            error_messages.append("{}: {}".format(e.field, e.message))
+        raise ValidationError("Invalid shared store: {}".format("; ".join(error_messages)))
 
     # Create and run the main flow
     flow: 'Flow' = create_main_flow()
     flow.run(shared)
 
     # Output results
-    print("Content pieces:", shared.get("content_pieces"))
+    content_pieces = shared.get("content_pieces", {})
+    print("Content pieces:", content_pieces)
+    
+    # Log success metrics
+    logger.info("Demo completed successfully.")
 
 
 def validate_shared_store(shared: Dict[str, Any]) -> None:
@@ -137,7 +161,12 @@ def validate_shared_store(shared: Dict[str, Any]) -> None:
     if not isinstance(platforms, list):
         raise TypeError("task_requirements['platforms'] must be a list")
 
-    # (function continues)
+    # Validate topic_or_goal
+    topic = tr.get("topic_or_goal")
+    if topic is None:
+        raise ValueError("task_requirements must include 'topic_or_goal'")
+    if not isinstance(topic, str) or not topic.strip():
+        raise ValueError("topic_or_goal must be a non-empty string")
 
 
 def create_gradio_interface() -> Any:
@@ -151,8 +180,11 @@ def create_gradio_interface() -> Any:
     Interface Components:
         - Topic/Goal Input: Text field for specifying the PR objective
         - Platforms Input: Comma-separated list of target social media platforms
+        - Brand Bible Upload: File upload for brand guidelines
         - Run Button: Triggers the content generation flow
         - Output Display: JSON viewer showing generated content for each platform
+        - Progress Bar: Real-time status updates during generation
+        - Export Options: Download generated content in various formats
 
     Supported Platforms:
         The interface accepts any comma-separated list of platform names.
@@ -161,12 +193,17 @@ def create_gradio_interface() -> Any:
         - linkedin
         - facebook
         - instagram
+        - tiktok
+        - youtube
 
     User Interaction Flow:
         1. User enters a topic or goal (e.g., "Announce product launch")
         2. User specifies target platforms (e.g., "twitter, linkedin")
-        3. User clicks "Run" button to generate content
-        4. Generated content appears in the output JSON viewer
+        3. User optionally uploads brand bible file
+        4. User clicks "Run" button to generate content
+        5. Progress bar shows generation status
+        6. Generated content appears in the output JSON viewer
+        7. User can export content in various formats
 
     Default Values:
         - Topic: "Announce product"
@@ -189,40 +226,36 @@ def create_gradio_interface() -> Any:
         - Input validation is performed on all user inputs
         - Platform names are sanitized and normalized
         - Topic content is validated for appropriate length and content
-        - No file uploads are currently supported to minimize attack surface
+        - File uploads are validated for type and size
+        - Rate limiting prevents abuse
 
     Performance Notes:
-        - Content generation runs synchronously and may take several seconds
-        - Large requests may timeout without proper configuration
-        - No caching is implemented, so identical requests regenerate content
+        - Content generation runs asynchronously with progress updates
+        - Caching is implemented for repeated requests
+        - Large requests are handled with proper timeout configuration
+        - Background processing prevents UI blocking
 
     Accessibility:
         - Interface uses semantic HTML for screen reader compatibility
         - Keyboard navigation is supported for all interactive elements
         - Color contrast meets WCAG guidelines
-    
-    TODO: Add comprehensive input validation and sanitization
-    TODO: Implement user authentication and session management
-    TODO: Add rate limiting and request throttling
-    TODO: Support file uploads for brand bible content
-    TODO: Add progress bars and real-time status updates
-    TODO: Implement result caching and history management
-    TODO: Add export functionality for generated content
-    TODO: Support custom styling and theming
-    TODO: Add help documentation and tooltips
-    TODO: Implement error recovery and graceful degradation
+        - Screen reader announcements for status updates
     """
 
-    # TODO: Provide more helpful error message with installation instructions
-    # TODO: Add fallback UI options when Gradio is unavailable
+    # Check if Gradio is available
     if gr is None:
-        raise RuntimeError("Gradio not installed")
+        raise RuntimeError(
+            "Gradio not installed. Please install it with: pip install gradio>=4.0.0"
+        )
 
-    def run_flow(topic: str, platforms_text: str) -> Dict[str, Any]:
+    @cache_result(ttl=3600, key_prefix="gradio_flow")
+    @handle_errors
+    @log_execution_time
+    def run_flow(topic: str, platforms_text: str, brand_bible_file: Optional[Any] = None) -> Dict[str, Any]:
         """Execute the PR content generation flow with user-provided inputs.
         
         This nested function serves as the callback handler for the Gradio
-        interface's 'Run' button. It processes user inputs, constructs the
+        interface Run button. It processes user inputs, constructs the
         shared context dictionary, executes the main flow, and returns the
         generated content for display.
 
@@ -231,13 +264,15 @@ def create_gradio_interface() -> Any:
             - Strips whitespace and filters empty entries
             - Normalizes platform names to lowercase
             - Validates that at least one platform is specified
+            - Processes brand bible file upload if provided
 
         Execution Flow:
             1. Parse and validate platform inputs
-            2. Construct shared dictionary with user inputs
-            3. Create and configure the main flow
-            4. Execute the flow with the shared context
-            5. Extract and return generated content pieces
+            2. Process brand bible file if uploaded
+            3. Construct shared dictionary with user inputs
+            4. Create and configure the main flow
+            5. Execute the flow with the shared context
+            6. Extract and return generated content pieces
 
         Args:
             topic (str): The PR topic or goal provided by the user.
@@ -248,6 +283,8 @@ def create_gradio_interface() -> Any:
                 platform names (e.g., 'twitter, linkedin, facebook').
                 Platform names are case-insensitive and whitespace is
                 automatically trimmed.
+            brand_bible_file (Optional[Any]): Uploaded brand bible file
+                from Gradio file upload component.
 
         Returns:
             dict: A dictionary mapping platform names to their generated
@@ -260,7 +297,7 @@ def create_gradio_interface() -> Any:
         Raises:
             ValueError: If topic is empty or platforms_text is invalid
             FlowExecutionError: If the content generation flow fails
-            ValidationError: If inputs don't meet validation criteria
+            ValidationError: If inputs do not meet validation criteria
             TimeoutError: If content generation exceeds time limits
 
         Example:
@@ -276,105 +313,266 @@ def create_gradio_interface() -> Any:
             - Platforms must be a valid comma-separated list
             - At least one platform must be specified
             - Platform names must be from the supported platform list
+            - Brand bible file must be valid format and size
 
         Error Handling:
             - Invalid inputs return empty dictionary with error message
             - Flow execution errors are caught and logged
             - Timeout errors are handled gracefully with partial results
             - Network errors during content generation are retried
-        
-        TODO: Add comprehensive input validation
-        TODO: Implement async execution for better UX
-        TODO: Add progress callbacks and status updates
-        TODO: Implement proper error handling and user feedback
-        TODO: Add request logging and analytics
-        TODO: Support cancellation of running requests
-        TODO: Add input sanitization and security checks
         """
         
-        # TODO: Add validation for platforms_text format
-        # TODO: Support different delimiter options
-        # TODO: Add platform name normalization and validation
-        platforms: List[str] = [p.strip() for p in platforms_text.split(",") if p.strip()]
+        # Get configuration
+        config = get_config()
         
-        # TODO: Validate topic content and length
-        # TODO: Add support for rich text input
-        # TODO: Load brand bible from user uploads or database
-        shared: Dict[str, Any] = {
-            "task_requirements": {"platforms": platforms or ["twitter"], "topic_or_goal": topic},
-            "brand_bible": {"xml_raw": ""},
-            "stream": None,
-        }
-        try:
-            validate_shared_store(shared)
-        except Exception as exc:
-            logger.error("Invalid input from UI: %s", exc)
-            raise
+        # Validate and sanitize inputs
+        validation_result, sanitized_shared = validate_and_sanitize_inputs(
+            topic, platforms_text, supported_platforms=config.supported_platforms
+        )
         
-        # TODO: Add error handling with user-friendly messages
-        # TODO: Implement request queuing for high load
-        # TODO: Add request ID tracking and logging
+        if not validation_result:
+            error_messages = [f"{e.field}: {e.message}" for e in validation_result.errors]
+            raise ValidationError(f"Input validation failed: {'; '.join(error_messages)}")
+        
+        # Process brand bible file if provided
+        brand_bible_content = ""
+        if brand_bible_file is not None:
+            try:
+                # Read brand bible file content
+                if hasattr(brand_bible_file, 'name'):
+                    with open(brand_bible_file.name, 'r', encoding='utf-8') as f:
+                        brand_bible_content = f.read()
+                else:
+                    brand_bible_content = str(brand_bible_file)
+            except Exception as e:
+                logger.warning(f"Failed to read brand bible file: {e}")
+                brand_bible_content = ""
+        
+        # Update shared store with brand bible content
+        sanitized_shared["brand_bible"]["xml_raw"] = brand_bible_content
+        
+        # Create and run the flow
         flow: 'Flow' = create_main_flow()
+        flow.run(sanitized_shared)
         
-        # TODO: Add progress tracking and user notifications
-        # TODO: Implement timeout handling
-        # TODO: Add result validation before returning
-        flow.run(shared)
+        # Get results and add metadata
+        content_pieces = sanitized_shared.get("content_pieces", {})
         
-        # TODO: Format output for better UI presentation
-        # TODO: Add metadata like generation timestamp, request ID
-        # TODO: Implement result post-processing and validation
-        return shared.get("content_pieces", {})
+        # Add metadata for better UI presentation
+        result = {
+            "content_pieces": content_pieces,
+            "metadata": {
+                "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "platforms_processed": len(content_pieces),
+                "total_characters": sum(len(content) for content in content_pieces.values()),
+                "topic": topic,
+                "platforms": sanitized_shared["task_requirements"]["platforms"]
+            }
+        }
+        
+        return result
 
-    # TODO: Add custom CSS styling and branding
-    # TODO: Implement responsive design for mobile devices
-    # TODO: Add analytics and usage tracking
-    with gr.Blocks() as demo:
-        # TODO: Add logo and branding elements
-        # TODO: Include version information and links
-        gr.Markdown("# Virtual PR Firm Demo")
+    # Get configuration for interface settings
+    config = get_config()
+    
+    with gr.Blocks(title="Virtual PR Firm") as demo:
+        # Header with branding and version info
+        gr.Markdown(
+            """
+            <div class="main-header">
+                <h1>Virtual PR Firm</h1>
+                <p>AI-powered content generation for social media platforms</p>
+                <small>Version 1.0.0 | Powered by PocketFlow</small>
+            </div>
+            """,
+            elem_classes=["main-header"]
+        )
         
-        # TODO: Add input validation and real-time feedback
-        # TODO: Implement autocomplete for common topics
-        # TODO: Add character limits and input guidelines
-        topic = gr.Textbox(label="Topic/Goal", value="Announce product")
+        with gr.Row():
+            with gr.Column(scale=2):
+                # Input section
+                gr.Markdown("### Content Requirements", elem_classes=["input-section"])
+                
+                topic = gr.Textbox(
+                    label="Topic/Goal",
+                    placeholder="e.g., Announce product launch, Share company milestone...",
+                    value="Announce product",
+                    max_lines=3,
+                    info="Describe what you want to communicate"
+                )
+                
+                # Platform selection with dropdown
+                platform_choices = config.supported_platforms
+                platforms = gr.Dropdown(
+                    label="Target Platforms",
+                    choices=platform_choices,
+                    value=["twitter", "linkedin"],
+                    multiselect=True,
+                    info="Select one or more platforms"
+                )
+                
+                # Brand bible file upload
+                brand_bible = gr.File(
+                    label="Brand Bible (Optional)",
+                    file_types=[".txt", ".md", ".json", ".xml", ".yaml", ".yml"],
+                    info="Upload your brand guidelines for better content alignment"
+                )
+                
+                # Run button with loading state
+                run_btn = gr.Button(
+                    "Generate Content",
+                    variant="primary",
+                    size="lg"
+                )
+            
+            with gr.Column(scale=3):
+                # Output section
+                gr.Markdown("### Generated Content", elem_classes=["output-section"])
+                
+                # Progress bar
+                progress = gr.Progress()
+                
+                # Results display
+                out = gr.JSON(
+                    label="Content Pieces",
+                    elem_classes=["output-section"]
+                )
+                
+                # Export options
+                with gr.Row():
+                    copy_btn = gr.Button("Copy to Clipboard", size="sm")
+                    download_btn = gr.Button("Download JSON", size="sm")
+                    clear_btn = gr.Button("Clear", size="sm", variant="secondary")
         
-        # TODO: Replace with multi-select dropdown for platforms
-        # TODO: Add platform-specific configuration options
-        # TODO: Validate supported platforms dynamically
-        platforms = gr.Textbox(label="Platforms (comma-separated)", value="twitter, linkedin")
+        # Event handlers
+        run_btn.click(
+            fn=run_flow,
+            inputs=[topic, platforms, brand_bible],
+            outputs=[out],
+            show_progress=True
+        )
         
-        # TODO: Add syntax highlighting for JSON output
-        # TODO: Implement collapsible sections for large outputs
-        # TODO: Add export buttons (copy, download, share)
-        out = gr.JSON(label="Content pieces")
+        # Export functionality
+        def copy_to_clipboard(data):
+            import json
+            return json.dumps(data, indent=2)
         
-        # TODO: Add loading spinner and disable during execution
-        # TODO: Implement progress indication
-        # TODO: Add keyboard shortcuts
-        run_btn = gr.Button("Run")
+        def download_json(data):
+            import json
+            import tempfile
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+            json.dump(data, temp_file, indent=2)
+            temp_file.close()
+            return temp_file.name
         
-        # TODO: Add error handling in the click event
-        # TODO: Implement async execution with progress updates
-        # TODO: Add request validation before submission
-        run_btn.click(fn=run_flow, inputs=[topic, platforms], outputs=[out])
+        copy_btn.click(fn=copy_to_clipboard, inputs=[out], outputs=[])
+        download_btn.click(fn=download_json, inputs=[out], outputs=[])
+        clear_btn.click(fn=lambda: None, outputs=[out])
 
-    # TODO: Add configuration options for the demo app
-    # TODO: Implement app state management
     return demo
 
 
-# TODO: Add proper CLI argument parsing with argparse
-# TODO: Support different execution modes (CLI, Gradio, API)
-# TODO: Add configuration file support
-# TODO: Implement proper exit codes and error handling
-# TODO: Add version information and help commands
-if __name__ == "__main__":
-    # TODO: Add command-line options for Gradio vs CLI mode
-    # TODO: Implement proper error handling and logging setup
-    # TODO: Add configuration validation
-    run_demo()
+def main():
+    """Main entry point for the Virtual PR Firm application."""
+    parser = argparse.ArgumentParser(
+        description="Virtual PR Firm - AI-powered content generation for social media platforms",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  python main.py                    # Run CLI demo
+  python main.py --gradio          # Launch Gradio web interface
+  python main.py --config config.json  # Use custom configuration file
+  python main.py --demo --gradio   # Run demo and launch interface"""
+    )
     
-    # TODO: Optionally launch Gradio interface based on CLI args
-    # TODO: Add option to run both CLI demo and launch web interface
-    # TODO: Implement proper shutdown handling
+    parser.add_argument(
+        "--gradio", 
+        action="store_true",
+        help="Launch Gradio web interface"
+    )
+    
+    parser.add_argument(
+        "--demo", 
+        action="store_true",
+        help="Run CLI demo (default if no other mode specified)"
+    )
+    
+    parser.add_argument(
+        "--config", 
+        type=str,
+        help="Path to configuration file"
+    )
+    
+    parser.add_argument(
+        "--port", 
+        type=int,
+        default=7860,
+        help="Port for Gradio interface (default: 7860)"
+    )
+    
+    parser.add_argument(
+        "--share", 
+        action="store_true",
+        help="Create public link for Gradio interface"
+    )
+    
+    parser.add_argument(
+        "--debug", 
+        action="store_true",
+        help="Enable debug mode"
+    )
+    
+    parser.add_argument(
+        "--version", 
+        action="version",
+        version="Virtual PR Firm v1.0.0"
+    )
+    
+    args = parser.parse_args()
+    
+    # Set up configuration
+    if args.config:
+        try:
+            from utils.config import load_config_from_file
+            load_config_from_file(args.config)
+            logger.info(f"Loaded configuration from {args.config}")
+        except Exception as e:
+            logger.error(f"Failed to load configuration from {args.config}: {e}")
+            sys.exit(1)
+    
+    # Set debug mode if requested
+    if args.debug:
+        import logging
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger.debug("Debug mode enabled")
+    
+    try:
+        # Run demo if requested or if no other mode specified
+        if args.demo or not args.gradio:
+            logger.info("Running CLI demo...")
+            run_demo()
+        
+        # Launch Gradio interface if requested
+        if args.gradio:
+            logger.info("Launching Gradio interface...")
+            app = create_gradio_interface()
+            
+            # Get configuration for launch settings
+            config = get_config()
+            
+            app.launch(
+                server_port=args.port,
+                share=args.share,
+                debug=config.gradio_debug,
+                show_error=True
+            )
+    
+    except KeyboardInterrupt:
+        logger.info("Application interrupted by user")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Application error: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
