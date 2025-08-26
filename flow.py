@@ -214,8 +214,7 @@ def create_streaming_flow():
     
     # Enhance with streaming if available
     try:
-        from utils.streaming import StreamingManager
-        
+                
         # TODO: Properly integrate StreamingManager with the flow
         # TODO: Add streaming event types and payload standardization
         # TODO: Implement streaming error handling and reconnection logic
