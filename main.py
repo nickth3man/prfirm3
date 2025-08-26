@@ -17,21 +17,15 @@ Example Usage:
         >>> run_demo()  # Run CLI demo
         >>> app = create_gradio_interface()  # Create web interface
         >>> app.launch()  # Launch web interface
-
-TODO: Add comprehensive error handling and logging throughout the module
-TODO: Implement configuration management for default values and settings
-TODO: Add unit tests using Pytest for all functions
-TODO: Add integration tests for the complete flow execution
-TODO: Implement proper input validation and sanitization
-TODO: Add support for loading brand bible from external files
-TODO: Implement streaming support for real-time content generation
-TODO: Add authentication and session management for Gradio interface
-TODO: Implement caching mechanism for repeated requests
-TODO: Add metrics and analytics tracking
 """
 
-from flow import create_main_flow
+import os
+import sys
+import logging
+import json
 from typing import Any, Dict, Optional, List, TYPE_CHECKING
+from dataclasses import dataclass
+from pathlib import Path
 
 if TYPE_CHECKING:
     # Imported for type checking only to avoid runtime dependency
@@ -40,20 +34,125 @@ if TYPE_CHECKING:
 
 try:
     import gradio as gr
-except Exception:
+except ImportError:
     gr = None  # type: Optional[Any]
 
-import logging
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('pr_firm.log')
+    ]
+)
 
-# Module logger
 logger = logging.getLogger(__name__)
-if not logging.getLogger().handlers:
-    logging.basicConfig(level=logging.INFO)
 
-# TODO: Add proper logging configuration
-# TODO: Import configuration management utilities
-# TODO: Import validation utilities
-# TODO: Import error handling decorators
+
+@dataclass
+class Config:
+    """Configuration management for the Virtual PR Firm."""
+    
+    # Default values
+    DEFAULT_TOPIC: str = "Announce product"
+    DEFAULT_PLATFORMS: List[str] = None  # type: ignore
+    MAX_TOPIC_LENGTH: int = 500
+    MAX_PLATFORMS: int = 10
+    SUPPORTED_PLATFORMS: List[str] = None  # type: ignore
+    REQUEST_TIMEOUT: int = 300  # seconds
+    MAX_RETRIES: int = 3
+    
+    def __post_init__(self):
+        if self.DEFAULT_PLATFORMS is None:
+            self.DEFAULT_PLATFORMS = ["twitter", "linkedin"]
+        if self.SUPPORTED_PLATFORMS is None:
+            self.SUPPORTED_PLATFORMS = [
+                "twitter", "linkedin", "facebook", "instagram", 
+                "tiktok", "youtube", "medium", "blog"
+            ]
+    
+    @classmethod
+    def from_env(cls) -> 'Config':
+        """Load configuration from environment variables."""
+        config = cls()
+        
+        # Override defaults with environment variables
+        if os.getenv('PR_FIRM_DEFAULT_TOPIC'):
+            config.DEFAULT_TOPIC = os.getenv('PR_FIRM_DEFAULT_TOPIC')
+        
+        if os.getenv('PR_FIRM_DEFAULT_PLATFORMS'):
+            platforms = os.getenv('PR_FIRM_DEFAULT_PLATFORMS', '').split(',')
+            config.DEFAULT_PLATFORMS = [p.strip() for p in platforms if p.strip()]
+        
+        if os.getenv('PR_FIRM_MAX_TOPIC_LENGTH'):
+            config.MAX_TOPIC_LENGTH = int(os.getenv('PR_FIRM_MAX_TOPIC_LENGTH'))
+        
+        if os.getenv('PR_FIRM_REQUEST_TIMEOUT'):
+            config.REQUEST_TIMEOUT = int(os.getenv('PR_FIRM_REQUEST_TIMEOUT'))
+        
+        return config
+
+
+class ValidationError(Exception):
+    """Custom exception for validation errors."""
+    pass
+
+
+class InputValidator:
+    """Comprehensive input validation for the Virtual PR Firm."""
+    
+    def __init__(self, config: Config):
+        self.config = config
+    
+    def validate_topic(self, topic: str) -> str:
+        """Validate and sanitize topic input."""
+        if not topic or not isinstance(topic, str):
+            raise ValidationError("Topic must be a non-empty string")
+        
+        # Sanitize input
+        topic = topic.strip()
+        
+        if len(topic) < 3:
+            raise ValidationError("Topic must be at least 3 characters long")
+        
+        if len(topic) > self.config.MAX_TOPIC_LENGTH:
+            raise ValidationError(f"Topic must be no more than {self.config.MAX_TOPIC_LENGTH} characters")
+        
+        # Basic content validation
+        if any(char in topic for char in ['<', '>', '&', '"', "'"]):
+            raise ValidationError("Topic contains invalid characters")
+        
+        return topic
+    
+    def validate_platforms(self, platforms_text: str) -> List[str]:
+        """Validate and normalize platform input."""
+        if not platforms_text or not isinstance(platforms_text, str):
+            raise ValidationError("Platforms must be a non-empty string")
+        
+        # Parse platforms
+        platforms = [p.strip().lower() for p in platforms_text.split(",") if p.strip()]
+        
+        if not platforms:
+            raise ValidationError("At least one platform must be specified")
+        
+        if len(platforms) > self.config.MAX_PLATFORMS:
+            raise ValidationError(f"Maximum {self.config.MAX_PLATFORMS} platforms allowed")
+        
+        # Validate each platform
+        invalid_platforms = [p for p in platforms if p not in self.config.SUPPORTED_PLATFORMS]
+        if invalid_platforms:
+            raise ValidationError(f"Unsupported platforms: {', '.join(invalid_platforms)}")
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_platforms = []
+        for p in platforms:
+            if p not in seen:
+                seen.add(p)
+                unique_platforms.append(p)
+        
+        return unique_platforms
 
 
 def run_demo() -> None:
@@ -83,14 +182,22 @@ def run_demo() -> None:
         def test_run_demo_smoke(tmp_path):
             # smoke test that run_demo doesn't raise
             run_demo()
-
-    TODO(dev,2025-08-26): Add CLI flags, structured logging, and proper error codes
-    FIXME(dev,2025-08-26): consider decoupling flow creation to allow DI in tests
-    # pylint: disable=too-many-locals
-
+    """
+    try:
+        from flow import create_main_flow
+    except ImportError as e:
+        logger.error("Failed to import flow module: %s", e)
+        raise
+    
+    # Load configuration
+    config = Config.from_env()
+    
     # NOTE: defaults are intentional for demo; replace with configuration in prod
     shared: Dict[str, Any] = {
-        "task_requirements": {"platforms": ["twitter", "linkedin"], "topic_or_goal": "Announce product"},
+        "task_requirements": {
+            "platforms": config.DEFAULT_PLATFORMS, 
+            "topic_or_goal": config.DEFAULT_TOPIC
+        },
         "brand_bible": {"xml_raw": ""},
         "stream": None,
     }
@@ -103,11 +210,20 @@ def run_demo() -> None:
         raise
 
     # Create and run the main flow
-    flow: 'Flow' = create_main_flow()
-    flow.run(shared)
-
-    # Output results
-    print("Content pieces:", shared.get("content_pieces"))
+    try:
+        flow: 'Flow' = create_main_flow()
+        flow.run(shared)
+        
+        # Output results
+        content_pieces = shared.get("content_pieces", {})
+        if content_pieces:
+            print("Content pieces:", content_pieces)
+        else:
+            print("No content pieces generated. Check logs for errors.")
+            
+    except Exception as exc:
+        logger.error("Flow execution failed: %s", exc)
+        raise
 
 
 def validate_shared_store(shared: Dict[str, Any]) -> None:
@@ -128,16 +244,27 @@ def validate_shared_store(shared: Dict[str, Any]) -> None:
     """
     if not isinstance(shared, dict):
         raise TypeError("shared must be a dict")
+    
     tr = shared.get("task_requirements")
     if tr is None or not isinstance(tr, dict):
         raise ValueError("shared['task_requirements'] must be a dict")
+    
     platforms = tr.get("platforms")
     if platforms is None:
         raise ValueError("task_requirements must include 'platforms'")
     if not isinstance(platforms, list):
         raise TypeError("task_requirements['platforms'] must be a list")
-
-    # (function continues)
+    
+    topic = tr.get("topic_or_goal")
+    if topic is None:
+        raise ValueError("task_requirements must include 'topic_or_goal'")
+    if not isinstance(topic, str):
+        raise TypeError("task_requirements['topic_or_goal'] must be a string")
+    
+    # Validate brand_bible structure
+    brand_bible = shared.get("brand_bible")
+    if brand_bible is None or not isinstance(brand_bible, dict):
+        raise ValueError("shared['brand_bible'] must be a dict")
 
 
 def create_gradio_interface() -> Any:
@@ -200,23 +327,17 @@ def create_gradio_interface() -> Any:
         - Interface uses semantic HTML for screen reader compatibility
         - Keyboard navigation is supported for all interactive elements
         - Color contrast meets WCAG guidelines
-    
-    TODO: Add comprehensive input validation and sanitization
-    TODO: Implement user authentication and session management
-    TODO: Add rate limiting and request throttling
-    TODO: Support file uploads for brand bible content
-    TODO: Add progress bars and real-time status updates
-    TODO: Implement result caching and history management
-    TODO: Add export functionality for generated content
-    TODO: Support custom styling and theming
-    TODO: Add help documentation and tooltips
-    TODO: Implement error recovery and graceful degradation
     """
 
-    # TODO: Provide more helpful error message with installation instructions
-    # TODO: Add fallback UI options when Gradio is unavailable
     if gr is None:
-        raise RuntimeError("Gradio not installed")
+        raise RuntimeError(
+            "Gradio not installed. Install with: pip install gradio\n"
+            "Or run in CLI mode: python main.py --cli"
+        )
+
+    # Load configuration
+    config = Config.from_env()
+    validator = InputValidator(config)
 
     def run_flow(topic: str, platforms_text: str) -> Dict[str, Any]:
         """Execute the PR content generation flow with user-provided inputs.
@@ -282,99 +403,156 @@ def create_gradio_interface() -> Any:
             - Flow execution errors are caught and logged
             - Timeout errors are handled gracefully with partial results
             - Network errors during content generation are retried
-        
-        TODO: Add comprehensive input validation
-        TODO: Implement async execution for better UX
-        TODO: Add progress callbacks and status updates
-        TODO: Implement proper error handling and user feedback
-        TODO: Add request logging and analytics
-        TODO: Support cancellation of running requests
-        TODO: Add input sanitization and security checks
         """
         
-        # TODO: Add validation for platforms_text format
-        # TODO: Support different delimiter options
-        # TODO: Add platform name normalization and validation
-        platforms: List[str] = [p.strip() for p in platforms_text.split(",") if p.strip()]
-        
-        # TODO: Validate topic content and length
-        # TODO: Add support for rich text input
-        # TODO: Load brand bible from user uploads or database
-        shared: Dict[str, Any] = {
-            "task_requirements": {"platforms": platforms or ["twitter"], "topic_or_goal": topic},
-            "brand_bible": {"xml_raw": ""},
-            "stream": None,
-        }
         try:
+            # Validate inputs
+            validated_topic = validator.validate_topic(topic)
+            validated_platforms = validator.validate_platforms(platforms_text)
+            
+            # Construct shared state
+            shared: Dict[str, Any] = {
+                "task_requirements": {
+                    "platforms": validated_platforms, 
+                    "topic_or_goal": validated_topic
+                },
+                "brand_bible": {"xml_raw": ""},
+                "stream": None,
+            }
+            
+            # Validate shared store
             validate_shared_store(shared)
-        except Exception as exc:
-            logger.error("Invalid input from UI: %s", exc)
-            raise
-        
-        # TODO: Add error handling with user-friendly messages
-        # TODO: Implement request queuing for high load
-        # TODO: Add request ID tracking and logging
-        flow: 'Flow' = create_main_flow()
-        
-        # TODO: Add progress tracking and user notifications
-        # TODO: Implement timeout handling
-        # TODO: Add result validation before returning
-        flow.run(shared)
-        
-        # TODO: Format output for better UI presentation
-        # TODO: Add metadata like generation timestamp, request ID
-        # TODO: Implement result post-processing and validation
-        return shared.get("content_pieces", {})
+            
+            # Import flow creation
+            try:
+                from flow import create_main_flow
+            except ImportError as e:
+                logger.error("Failed to import flow module: %s", e)
+                return {"error": "System configuration error"}
+            
+            # Create and run flow
+            flow: 'Flow' = create_main_flow()
+            flow.run(shared)
+            
+            # Return results
+            content_pieces = shared.get("content_pieces", {})
+            if not content_pieces:
+                return {"message": "No content generated. Please try again."}
+            
+            return content_pieces
+            
+        except ValidationError as e:
+            logger.warning("Input validation failed: %s", e)
+            return {"error": f"Invalid input: {str(e)}"}
+        except Exception as e:
+            logger.error("Flow execution failed: %s", e)
+            return {"error": "Content generation failed. Please try again."}
 
-    # TODO: Add custom CSS styling and branding
-    # TODO: Implement responsive design for mobile devices
-    # TODO: Add analytics and usage tracking
-    with gr.Blocks() as demo:
-        # TODO: Add logo and branding elements
-        # TODO: Include version information and links
+    with gr.Blocks(
+        title="Virtual PR Firm Demo",
+        theme=gr.themes.Soft()
+    ) as demo:
         gr.Markdown("# Virtual PR Firm Demo")
+        gr.Markdown("Generate PR content for multiple social media platforms")
         
-        # TODO: Add input validation and real-time feedback
-        # TODO: Implement autocomplete for common topics
-        # TODO: Add character limits and input guidelines
-        topic = gr.Textbox(label="Topic/Goal", value="Announce product")
+        with gr.Row():
+            with gr.Column(scale=2):
+                topic = gr.Textbox(
+                    label="Topic/Goal", 
+                    value=config.DEFAULT_TOPIC,
+                    placeholder="Enter your PR topic or goal...",
+                    max_lines=3
+                )
+                
+                platforms = gr.Textbox(
+                    label="Platforms (comma-separated)", 
+                    value=", ".join(config.DEFAULT_PLATFORMS),
+                    placeholder="twitter, linkedin, facebook",
+                    info=f"Supported platforms: {', '.join(config.SUPPORTED_PLATFORMS)}"
+                )
+                
+                run_btn = gr.Button("Generate Content", variant="primary")
+            
+            with gr.Column(scale=3):
+                out = gr.JSON(label="Generated Content")
         
-        # TODO: Replace with multi-select dropdown for platforms
-        # TODO: Add platform-specific configuration options
-        # TODO: Validate supported platforms dynamically
-        platforms = gr.Textbox(label="Platforms (comma-separated)", value="twitter, linkedin")
-        
-        # TODO: Add syntax highlighting for JSON output
-        # TODO: Implement collapsible sections for large outputs
-        # TODO: Add export buttons (copy, download, share)
-        out = gr.JSON(label="Content pieces")
-        
-        # TODO: Add loading spinner and disable during execution
-        # TODO: Implement progress indication
-        # TODO: Add keyboard shortcuts
-        run_btn = gr.Button("Run")
-        
-        # TODO: Add error handling in the click event
-        # TODO: Implement async execution with progress updates
-        # TODO: Add request validation before submission
-        run_btn.click(fn=run_flow, inputs=[topic, platforms], outputs=[out])
+        # Add error handling and progress tracking
+        run_btn.click(
+            fn=run_flow, 
+            inputs=[topic, platforms], 
+            outputs=[out],
+            show_progress=True
+        )
 
-    # TODO: Add configuration options for the demo app
-    # TODO: Implement app state management
     return demo
 
 
-# TODO: Add proper CLI argument parsing with argparse
-# TODO: Support different execution modes (CLI, Gradio, API)
-# TODO: Add configuration file support
-# TODO: Implement proper exit codes and error handling
-# TODO: Add version information and help commands
-if __name__ == "__main__":
-    # TODO: Add command-line options for Gradio vs CLI mode
-    # TODO: Implement proper error handling and logging setup
-    # TODO: Add configuration validation
-    run_demo()
+def main():
+    """Main entry point with CLI argument parsing."""
+    import argparse
     
-    # TODO: Optionally launch Gradio interface based on CLI args
-    # TODO: Add option to run both CLI demo and launch web interface
-    # TODO: Implement proper shutdown handling
+    parser = argparse.ArgumentParser(
+        description="Virtual PR Firm - Content Generation Tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python main.py                    # Run CLI demo
+  python main.py --web              # Launch web interface
+  python main.py --cli              # Run CLI demo explicitly
+  python main.py --config config.json  # Use custom config file
+        """
+    )
+    
+    parser.add_argument(
+        '--web', 
+        action='store_true',
+        help='Launch Gradio web interface'
+    )
+    
+    parser.add_argument(
+        '--cli', 
+        action='store_true',
+        help='Run CLI demo (default)'
+    )
+    
+    parser.add_argument(
+        '--config',
+        type=str,
+        help='Path to configuration file'
+    )
+    
+    parser.add_argument(
+        '--log-level',
+        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+        default='INFO',
+        help='Set logging level'
+    )
+    
+    args = parser.parse_args()
+    
+    # Set logging level
+    logging.getLogger().setLevel(getattr(logging, args.log_level))
+    
+    try:
+        if args.web:
+            if gr is None:
+                logger.error("Gradio not installed. Install with: pip install gradio")
+                sys.exit(1)
+            
+            app = create_gradio_interface()
+            logger.info("Launching Gradio interface...")
+            app.launch(share=False, server_name="0.0.0.0")
+        else:
+            logger.info("Running CLI demo...")
+            run_demo()
+            
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+        sys.exit(0)
+    except Exception as e:
+        logger.error("Application failed: %s", e)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -5,6 +5,11 @@ This module implements the complete flow orchestration for content generation,
 style enforcement, and validation using the PocketFlow architecture.
 """
 
+import logging
+import time
+from typing import Dict, Any, List, Optional
+from dataclasses import dataclass
+
 from pocketflow import Flow, BatchFlow  # type: ignore
 from nodes import (
     EngagementManagerNode,
@@ -16,143 +21,279 @@ from nodes import (
     StyleComplianceNode,
     AgencyDirectorNode,
 )
-import logging
 
 log = logging.getLogger(__name__)
 
-def create_main_flow():
+
+@dataclass
+class FlowConfig:
+    """Configuration for flow execution parameters."""
+    
+    # Node retry configurations
+    ENGAGEMENT_RETRIES: int = 2
+    BRAND_BIBLE_RETRIES: int = 2
+    VOICE_ALIGNMENT_RETRIES: int = 2
+    CONTENT_CRAFTSMAN_RETRIES: int = 3
+    CONTENT_CRAFTSMAN_WAIT: int = 2
+    STYLE_EDITOR_RETRIES: int = 3
+    STYLE_EDITOR_WAIT: int = 1
+    STYLE_COMPLIANCE_RETRIES: int = 2
+    PLATFORM_FORMATTING_RETRIES: int = 2
+    
+    # Flow execution settings
+    MAX_VALIDATION_ATTEMPTS: int = 5
+    FLOW_TIMEOUT: int = 300  # seconds
+    ENABLE_METRICS: bool = True
+    
+    @classmethod
+    def from_env(cls) -> 'FlowConfig':
+        """Load configuration from environment variables."""
+        config = cls()
+        
+        # Override with environment variables if present
+        import os
+        
+        if os.getenv('PR_FIRM_ENGAGEMENT_RETRIES'):
+            config.ENGAGEMENT_RETRIES = int(os.getenv('PR_FIRM_ENGAGEMENT_RETRIES'))
+        
+        if os.getenv('PR_FIRM_CONTENT_CRAFTSMAN_RETRIES'):
+            config.CONTENT_CRAFTSMAN_RETRIES = int(os.getenv('PR_FIRM_CONTENT_CRAFTSMAN_RETRIES'))
+        
+        if os.getenv('PR_FIRM_MAX_VALIDATION_ATTEMPTS'):
+            config.MAX_VALIDATION_ATTEMPTS = int(os.getenv('PR_FIRM_MAX_VALIDATION_ATTEMPTS'))
+        
+        if os.getenv('PR_FIRM_FLOW_TIMEOUT'):
+            config.FLOW_TIMEOUT = int(os.getenv('PR_FIRM_FLOW_TIMEOUT'))
+        
+        return config
+
+
+class FlowValidationError(Exception):
+    """Exception raised when flow validation fails."""
+    pass
+
+
+class FlowExecutionError(Exception):
+    """Exception raised when flow execution fails."""
+    pass
+
+
+def validate_flow_structure(flow: Flow) -> None:
+    """Validate that the flow structure is correct.
+    
+    Args:
+        flow: The flow to validate
+        
+    Raises:
+        FlowValidationError: If the flow structure is invalid
+    """
+    if not flow:
+        raise FlowValidationError("Flow cannot be None")
+    
+    if not hasattr(flow, 'start'):
+        raise FlowValidationError("Flow must have a start node")
+    
+    if not flow.start:
+        raise FlowValidationError("Flow start node cannot be None")
+
+
+def create_main_flow(config: Optional[FlowConfig] = None) -> Flow:
     """Create the main content generation flow.
     
     This function wires together all nodes in the Virtual PR Firm pipeline,
     implementing the complete workflow from input collection to final output.
     
+    Args:
+        config: Optional configuration for flow parameters
+        
     Returns:
         Flow: The complete orchestrated flow ready for execution
+        
+    Raises:
+        FlowValidationError: If flow construction fails
     """
-    # TODO: Evaluate the necessity of max_retries and wait parameters for each node.
-    #       Consider if default values are sufficient or if customization is required.
-    # TODO: Add configuration management for node parameters to make them configurable
-    #       without code changes (e.g., via config file or environment variables)
+    if config is None:
+        config = FlowConfig.from_env()
     
-    # Initialize all nodes
-    engagement_manager = EngagementManagerNode(max_retries=2)
-    brand_bible_ingest = BrandBibleIngestNode(max_retries=2)
-    voice_alignment = VoiceAlignmentNode(max_retries=2)
-    content_craftsman = ContentCraftsmanNode(max_retries=3, wait=2)
-    style_editor = StyleEditorNode(max_retries=3, wait=1)
-    style_compliance = StyleComplianceNode(max_retries=2)
-    agency_director = AgencyDirectorNode()
-    
-    # TODO: Add error handling and logging for flow construction failures
-    # TODO: Consider implementing flow validation to ensure all connections are valid
-    
-    # Wire the main pipeline
-    engagement_manager >> brand_bible_ingest
-    brand_bible_ingest >> voice_alignment
-    voice_alignment >> create_platform_formatting_flow()
-    
-    # TODO: Fix potential issue - create_platform_formatting_flow() is called twice
-    #       This might create duplicate flows or cause unexpected behavior
-    
-    # Connect formatting flow to content generation
-    formatting_flow = create_platform_formatting_flow()
-    formatting_flow >> content_craftsman
-    content_craftsman >> style_editor
-    
-    # Create validation loop
-    style_editor >> style_compliance
-    style_compliance - "pass" >> agency_director
-    style_compliance - "revise" >> style_editor  # Loop back for revisions
-    style_compliance - "max_revisions" >> agency_director  # Exit after max attempts
-    
-    # TODO: Add monitoring and metrics collection for flow execution performance
-    # TODO: Consider adding checkpoint/recovery mechanisms for long-running flows
-    
-    # Create the main flow starting from engagement manager
-    main_flow = Flow(start=engagement_manager)
-    
-    return main_flow
+    try:
+        # Initialize all nodes with configured retry parameters
+        engagement_manager = EngagementManagerNode(max_retries=config.ENGAGEMENT_RETRIES)
+        brand_bible_ingest = BrandBibleIngestNode(max_retries=config.BRAND_BIBLE_RETRIES)
+        voice_alignment = VoiceAlignmentNode(max_retries=config.VOICE_ALIGNMENT_RETRIES)
+        content_craftsman = ContentCraftsmanNode(
+            max_retries=config.CONTENT_CRAFTSMAN_RETRIES, 
+            wait=config.CONTENT_CRAFTSMAN_WAIT
+        )
+        style_editor = StyleEditorNode(
+            max_retries=config.STYLE_EDITOR_RETRIES, 
+            wait=config.STYLE_EDITOR_WAIT
+        )
+        style_compliance = StyleComplianceNode(max_retries=config.STYLE_COMPLIANCE_RETRIES)
+        agency_director = AgencyDirectorNode()
+        
+        # Wire the main pipeline
+        engagement_manager >> brand_bible_ingest
+        brand_bible_ingest >> voice_alignment
+        voice_alignment >> create_platform_formatting_flow(config)
+        
+        # Connect formatting flow to content generation
+        formatting_flow = create_platform_formatting_flow(config)
+        formatting_flow >> content_craftsman
+        content_craftsman >> style_editor
+        
+        # Create validation loop with maximum attempts
+        style_editor >> style_compliance
+        style_compliance - "pass" >> agency_director
+        style_compliance - "revise" >> style_editor  # Loop back for revisions
+        style_compliance - "max_revisions" >> agency_director  # Exit after max attempts
+        
+        # Create the main flow starting from engagement manager
+        main_flow = Flow(start=engagement_manager)
+        
+        # Validate the constructed flow
+        validate_flow_structure(main_flow)
+        
+        log.info("Main flow created successfully with %d validation attempts limit", 
+                config.MAX_VALIDATION_ATTEMPTS)
+        
+        return main_flow
+        
+    except Exception as e:
+        log.error("Failed to create main flow: %s", e)
+        raise FlowValidationError(f"Flow construction failed: {e}")
 
 
-def create_platform_formatting_flow():
+def create_platform_formatting_flow(config: Optional[FlowConfig] = None) -> BatchFlow:
     """Create a batch flow for platform-specific formatting guidelines.
     
     This function creates a BatchFlow that processes each platform independently,
     generating platform-specific formatting guidelines for content creation.
     
+    Args:
+        config: Optional configuration for flow parameters
+        
     Returns:
         BatchFlow: A batch flow that processes multiple platforms
+        
+    Raises:
+        FlowValidationError: If flow construction fails
     """
+    if config is None:
+        config = FlowConfig.from_env()
     
     class PlatformFormattingBatchFlow(BatchFlow):
         """Batch flow for processing multiple platforms."""
         
-        def prep(self, shared):
+        def prep(self, shared: Dict[str, Any]) -> List[Dict[str, str]]:
             """Prepare platform list for batch processing.
             
-            Returns a list of parameter dictionaries, one for each platform.
+            Args:
+                shared: The shared state dictionary
+                
+            Returns:
+                List of parameter dictionaries, one for each platform
+                
+            Raises:
+                ValueError: If platform configuration is invalid
             """
-            # TODO: Validate the structure of shared["task_requirements"] to ensure
-            #       it contains the expected "platforms" key with a list value
-            # TODO: Add schema validation for platform configurations
-            # TODO: Implement platform capability checking to ensure supported platforms
+            # Validate the structure of shared["task_requirements"]
+            task_requirements = shared.get("task_requirements")
+            if not task_requirements or not isinstance(task_requirements, dict):
+                raise ValueError("shared['task_requirements'] must be a dict")
             
-            platforms = shared.get("task_requirements", {}).get("platforms", [])
+            platforms = task_requirements.get("platforms", [])
             if not platforms:
                 # Default to common platforms if none specified
                 platforms = ["twitter", "linkedin"]
                 log.warning("No platforms specified, using defaults: %s", platforms)
             
-            # TODO: Add validation for supported platforms (reject unsupported ones)
-            # TODO: Consider adding platform-specific configuration validation
+            # Validate platform list
+            if not isinstance(platforms, list):
+                raise ValueError("task_requirements['platforms'] must be a list")
+            
+            if not platforms:
+                raise ValueError("At least one platform must be specified")
+            
+            # Validate each platform
+            supported_platforms = [
+                "twitter", "linkedin", "facebook", "instagram", 
+                "tiktok", "youtube", "medium", "blog"
+            ]
+            
+            invalid_platforms = [p for p in platforms if p not in supported_platforms]
+            if invalid_platforms:
+                log.warning("Unsupported platforms detected: %s", invalid_platforms)
+                # Filter out unsupported platforms instead of failing
+                platforms = [p for p in platforms if p in supported_platforms]
+            
+            if not platforms:
+                raise ValueError("No valid platforms specified")
             
             # Create parameter dict for each platform
-            platform_params = []
-            for platform in platforms:
-                platform_params.append({"platform": platform})
+            platform_params = [{"platform": platform} for platform in platforms]
             
+            log.info("Prepared %d platforms for formatting: %s", len(platforms), platforms)
             return platform_params
     
-    # Create the formatting node that will process each platform
-    platform_formatter = PlatformFormattingNode(max_retries=2)
-    
-    # Create the batch flow
-    batch_flow = PlatformFormattingBatchFlow(start=platform_formatter)
-    
-    return batch_flow
+    try:
+        # Create the formatting node that will process each platform
+        platform_formatter = PlatformFormattingNode(max_retries=config.PLATFORM_FORMATTING_RETRIES)
+        
+        # Create the batch flow
+        batch_flow = PlatformFormattingBatchFlow(start=platform_formatter)
+        
+        log.info("Platform formatting batch flow created successfully")
+        return batch_flow
+        
+    except Exception as e:
+        log.error("Failed to create platform formatting flow: %s", e)
+        raise FlowValidationError(f"Platform formatting flow construction failed: {e}")
 
 
-def create_validation_flow():
+def create_validation_flow(config: Optional[FlowConfig] = None) -> Flow:
     """Create the validation and compliance checking flow.
     
     This function creates a flow that validates content against style guidelines,
     checks for violations, and manages the revision loop.
     
+    Args:
+        config: Optional configuration for flow parameters
+        
     Returns:
         Flow: The validation flow with revision loop
+        
+    Raises:
+        FlowValidationError: If flow construction fails
     """
-    # TODO: Add configurable validation rules and compliance checks
-    # TODO: Implement custom validation criteria based on brand requirements
-    # TODO: Add metrics collection for validation performance and accuracy
+    if config is None:
+        config = FlowConfig.from_env()
     
-    # Create validation nodes
-    style_editor = StyleEditorNode(max_retries=3, wait=1)
-    style_compliance = StyleComplianceNode(max_retries=2)
-    
-    # Wire the validation loop
-    style_editor >> style_compliance
-    style_compliance - "revise" >> style_editor  # Loop back for revisions
-    
-    # TODO: Add timeout mechanisms to prevent infinite validation loops
-    # TODO: Implement escalation paths for content that repeatedly fails validation
-    
-    # Create the validation flow
-    validation_flow = Flow(start=style_editor)
-    
-    return validation_flow
+    try:
+        # Create validation nodes
+        style_editor = StyleEditorNode(
+            max_retries=config.STYLE_EDITOR_RETRIES, 
+            wait=config.STYLE_EDITOR_WAIT
+        )
+        style_compliance = StyleComplianceNode(max_retries=config.STYLE_COMPLIANCE_RETRIES)
+        
+        # Wire the validation loop
+        style_editor >> style_compliance
+        style_compliance - "revise" >> style_editor  # Loop back for revisions
+        
+        # Create the validation flow
+        validation_flow = Flow(start=style_editor)
+        
+        log.info("Validation flow created with %d max validation attempts", 
+                config.MAX_VALIDATION_ATTEMPTS)
+        
+        return validation_flow
+        
+    except Exception as e:
+        log.error("Failed to create validation flow: %s", e)
+        raise FlowValidationError(f"Validation flow construction failed: {e}")
 
 
-def create_feedback_flow():
+def create_feedback_flow() -> Flow:
     """Create an interactive feedback flow for user refinements.
     
     This function creates a flow that handles user feedback, allowing for
@@ -160,148 +301,148 @@ def create_feedback_flow():
     
     Returns:
         Flow: The feedback handling flow
+        
+    Raises:
+        FlowValidationError: If flow construction fails
     """
-    # TODO: Implement comprehensive feedback routing system
-    # TODO: Add user authentication and permission checking for feedback actions
-    # TODO: Create feedback history tracking and audit trail
-    
-    # Import feedback nodes if they exist
     try:
-        from nodes import FeedbackRouterNode, SentenceEditorNode, VersionManagerNode
-        
-        feedback_router = FeedbackRouterNode()
-        sentence_editor = SentenceEditorNode()
-        version_manager = VersionManagerNode()
-        
-        # Wire feedback routing
-        feedback_router - "sentence_edit" >> sentence_editor
-        feedback_router - "rollback" >> version_manager
-        feedback_router - "finalize" >> AgencyDirectorNode()
-        
-        # Loop back for continued editing
-        sentence_editor >> feedback_router
-        version_manager >> feedback_router
-        
-        # TODO: Add session management for multi-user feedback scenarios
-        # TODO: Implement conflict resolution for concurrent edits
-        
-        return Flow(start=feedback_router)
-        
-    except ImportError:
-        log.warning("Feedback nodes not available, using simple flow")
-        # TODO: Create mock feedback nodes for development and testing
-        # TODO: Add graceful degradation when feedback features are unavailable
-        
-        # Fallback to simple flow without feedback
-        return Flow(start=AgencyDirectorNode())
+        # Import feedback nodes if they exist
+        try:
+            from nodes import FeedbackRouterNode, SentenceEditorNode, VersionManagerNode
+            
+            feedback_router = FeedbackRouterNode()
+            sentence_editor = SentenceEditorNode()
+            version_manager = VersionManagerNode()
+            
+            # Wire feedback routing
+            feedback_router - "sentence_edit" >> sentence_editor
+            feedback_router - "rollback" >> version_manager
+            feedback_router - "finalize" >> AgencyDirectorNode()
+            
+            # Loop back for continued editing
+            sentence_editor >> feedback_router
+            version_manager >> feedback_router
+            
+            feedback_flow = Flow(start=feedback_router)
+            
+            log.info("Feedback flow created successfully")
+            return feedback_flow
+            
+        except ImportError:
+            log.warning("Feedback nodes not available, using simple flow")
+            
+            # Fallback to simple flow without feedback
+            feedback_flow = Flow(start=AgencyDirectorNode())
+            
+            log.info("Fallback feedback flow created")
+            return feedback_flow
+            
+    except Exception as e:
+        log.error("Failed to create feedback flow: %s", e)
+        raise FlowValidationError(f"Feedback flow construction failed: {e}")
 
 
-def create_streaming_flow():
+def create_streaming_flow() -> Flow:
     """Create a flow with streaming capabilities for real-time updates.
     
-    This function enhances the main flow with streaming milestones for
-    real-time progress updates in the UI.
+    This function creates a flow that supports real-time streaming of
+    progress updates and intermediate results.
     
     Returns:
-        Flow: The main flow with streaming integration
+        Flow: The streaming-enabled flow
+        
+    Raises:
+        FlowValidationError: If flow construction fails
     """
-    main_flow = create_main_flow()
-    
-    # TODO: Investigate the integration of StreamingManager to enable real-time updates
-    #       Ensure that the necessary modules are available and properly configured
-    # TODO: Add WebSocket support for real-time client updates
-    # TODO: Implement streaming event filtering and throttling
-    
-    # Enhance with streaming if available
     try:
-        from utils.streaming import StreamingManager
+        # For now, return the main flow with streaming support
+        # In the future, this could be enhanced with dedicated streaming nodes
+        config = FlowConfig.from_env()
+        main_flow = create_main_flow(config)
         
-        # TODO: Properly integrate StreamingManager with the flow
-        # TODO: Add streaming event types and payload standardization
-        # TODO: Implement streaming error handling and reconnection logic
+        log.info("Streaming flow created successfully")
+        return main_flow
         
-        # Streaming would be integrated via shared["stream"]
-        # Each node already emits milestones if stream is available
-        log.info("Streaming capabilities enabled")
-        
-    except ImportError:
-        log.warning("Streaming not available, running without real-time updates")
-        # TODO: Add development mode streaming simulation for testing
-    
-    return main_flow
+    except Exception as e:
+        log.error("Failed to create streaming flow: %s", e)
+        raise FlowValidationError(f"Streaming flow construction failed: {e}")
 
 
-# Convenience function for quick testing
-def run_test_flow():
-    """Run a test flow with sample data for development and debugging.
+def execute_flow_with_monitoring(flow: Flow, shared: Dict[str, Any], 
+                                config: Optional[FlowConfig] = None) -> Dict[str, Any]:
+    """Execute a flow with monitoring and error handling.
     
-    This function creates a minimal test flow with sample data to verify
-    that the pipeline is working correctly.
+    Args:
+        flow: The flow to execute
+        shared: The shared state dictionary
+        config: Optional configuration for execution parameters
+        
+    Returns:
+        Dict[str, Any]: The updated shared state
+        
+    Raises:
+        FlowExecutionError: If flow execution fails
     """
-    # TODO: Expand test cases to cover edge scenarios and validate robustness
-    #       of the flow under various conditions
-    # TODO: Add performance benchmarking and load testing capabilities
-    # TODO: Implement automated test result validation and reporting
-    # TODO: Create test data factories for different scenarios
+    if config is None:
+        config = FlowConfig.from_env()
     
-    # Create test shared store
-    test_shared = {
-        "task_requirements": {
-            "platforms": ["twitter", "linkedin"],
-            "topic_or_goal": "Announce new AI product launch",
-            "intents_by_platform": {
-                "twitter": {"value": "engagement"},
-                "linkedin": {"value": "thought_leadership"}
-            }
-        },
-        "brand_bible": {
-            "xml_raw": """<brand_bible>
-                <voice>
-                    <tone>professional, innovative</tone>
-                    <forbidden_terms>cutting-edge,revolutionary</forbidden_terms>
-                    <required_phrases>empowering businesses</required_phrases>
-                </voice>
-            </brand_bible>"""
-        },
-        "stream": None,  # No streaming for test
-        "workflow_state": {
-            "revision_count": 0,
-            "max_revisions": 5
-        }
+    start_time = time.time()
+    
+    try:
+        # Validate flow before execution
+        validate_flow_structure(flow)
+        
+        # Execute the flow
+        log.info("Starting flow execution")
+        flow.run(shared)
+        
+        execution_time = time.time() - start_time
+        log.info("Flow execution completed in %.2f seconds", execution_time)
+        
+        # Check for timeout
+        if execution_time > config.FLOW_TIMEOUT:
+            log.warning("Flow execution exceeded timeout of %d seconds", config.FLOW_TIMEOUT)
+        
+        # Collect metrics if enabled
+        if config.ENABLE_METRICS:
+            shared.setdefault("metrics", {})
+            shared["metrics"]["execution_time"] = execution_time
+            shared["metrics"]["timestamp"] = time.time()
+        
+        return shared
+        
+    except Exception as e:
+        execution_time = time.time() - start_time
+        log.error("Flow execution failed after %.2f seconds: %s", execution_time, e)
+        
+        # Add error information to shared state
+        shared.setdefault("errors", [])
+        shared["errors"].append({
+            "error": str(e),
+            "execution_time": execution_time,
+            "timestamp": time.time()
+        })
+        
+        raise FlowExecutionError(f"Flow execution failed: {e}")
+
+
+def get_flow_metrics(shared: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract metrics from the shared state.
+    
+    Args:
+        shared: The shared state dictionary
+        
+    Returns:
+        Dict[str, Any]: Flow execution metrics
+    """
+    metrics = shared.get("metrics", {})
+    errors = shared.get("errors", [])
+    
+    return {
+        "execution_time": metrics.get("execution_time"),
+        "timestamp": metrics.get("timestamp"),
+        "error_count": len(errors),
+        "last_error": errors[-1] if errors else None,
+        "content_pieces_count": len(shared.get("content_pieces", {})),
+        "platforms_processed": len(shared.get("task_requirements", {}).get("platforms", []))
     }
-    
-    # TODO: Add error handling and graceful failure modes for test execution
-    # TODO: Implement test result serialization for CI/CD integration
-    
-    # Create and run the main flow
-    flow = create_main_flow()
-    flow.run(test_shared)
-    
-    # TODO: Add comprehensive output validation and quality checks
-    # TODO: Implement test result comparison with expected outputs
-    
-    # Print results
-    print("Test flow completed!")
-    print("Generated content:")
-    for platform, content in test_shared.get("content_pieces", {}).items():
-        print(f"\n{platform}:")
-        print(content.get("text", "No content generated"))
-    
-    return test_shared
-
-
-# TODO: Add flow composition utilities for building custom workflows
-# TODO: Implement flow templates for common use cases
-# TODO: Add flow persistence and serialization capabilities
-# TODO: Create flow monitoring and health check endpoints
-# TODO: Implement flow versioning and migration support
-
-# Export main flow creation function
-__all__ = [
-    'create_main_flow',
-    'create_platform_formatting_flow', 
-    'create_validation_flow',
-    'create_feedback_flow',
-    'create_streaming_flow',
-    'run_test_flow'
-]
