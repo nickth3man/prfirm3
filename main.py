@@ -222,7 +222,7 @@ def create_gradio_interface() -> Any:
         """Execute the PR content generation flow with user-provided inputs.
         
         This nested function serves as the callback handler for the Gradio
-        interface's "Run" button. It processes user inputs, constructs the
+        interface's 'Run' button. It processes user inputs, constructs the
         shared context dictionary, executes the main flow, and returns the
         generated content for display.
 
@@ -242,10 +242,10 @@ def create_gradio_interface() -> Any:
         Args:
             topic (str): The PR topic or goal provided by the user.
                 Should be a descriptive string indicating the purpose
-                of the PR content (e.g., "Announce product launch",
-                "Share company milestone").
+                of the PR content (e.g., 'Announce product launch',
+                'Share company milestone').
             platforms_text (str): A comma-separated string of target
-                platform names (e.g., "twitter, linkedin, facebook").
+                platform names (e.g., 'twitter, linkedin, facebook').
                 Platform names are case-insensitive and whitespace is
                 automatically trimmed.
 
@@ -253,8 +253,8 @@ def create_gradio_interface() -> Any:
             dict: A dictionary mapping platform names to their generated
                 content. The structure is:
                 {
-                    "platform_name": "Generated content for this platform...",
-                    "another_platform": "Different content for this platform..."
+                    'platform_name': 'Generated content for this platform...',
+                    'another_platform': 'Different content for this platform...'
                 }
 
         Raises:
@@ -264,7 +264,7 @@ def create_gradio_interface() -> Any:
             TimeoutError: If content generation exceeds time limits
 
         Example:
-            >>> result = run_flow("Launch new feature", "twitter, linkedin")
+            >>> result = run_flow('Launch new feature', 'twitter, linkedin')
             >>> print(result)
             {
                 'twitter': 'Exciting news! Our new feature is here...',
