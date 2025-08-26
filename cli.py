@@ -48,7 +48,13 @@ class CLIError(Exception):
 
 
 def print_error(message: str, error: Optional[Exception] = None):
-    """Print error message with optional exception details."""
+    """
+    Print an error message to the user, using the global Rich console when available.
+    
+    Parameters:
+        message (str): Primary error message to display.
+        error (Optional[Exception]): Optional exception whose string representation will be printed on the following line for additional context.
+    """
     if console:
         console.print(f"[red]Error:[/red] {message}")
         if error:
@@ -60,7 +66,12 @@ def print_error(message: str, error: Optional[Exception] = None):
 
 
 def print_success(message: str):
-    """Print success message."""
+    """
+    Print a success message to the user, using colored output when Rich is available.
+    
+    Parameters:
+        message (str): Message text to display; will be prefixed with a check mark. Uses the global Rich Console (if available) for colored output, otherwise prints plain text to stdout.
+    """
     if console:
         console.print(f"[green]✓[/green] {message}")
     else:
@@ -68,7 +79,14 @@ def print_success(message: str):
 
 
 def print_info(message: str):
-    """Print info message."""
+    """
+    Print an informational message to the user.
+    
+    Uses the global Rich Console (if available) to render a colored info icon; otherwise falls back to plain stdout.
+    
+    Parameters:
+        message (str): The message text to display.
+    """
     if console:
         console.print(f"[blue]ℹ[/blue] {message}")
     else:
@@ -76,7 +94,12 @@ def print_info(message: str):
 
 
 def print_warning(message: str):
-    """Print warning message."""
+    """
+    Print a warning message to the user, using the global Rich console when available.
+    
+    Parameters:
+        message (str): Warning text to display. Shown with a leading warning glyph and colored output when Rich is enabled.
+    """
     if console:
         console.print(f"[yellow]⚠[/yellow] {message}")
     else:
@@ -85,7 +108,25 @@ def print_warning(message: str):
 
 @contextmanager
 def progress_context(description: str, total: Optional[int] = None):
-    """Context manager for progress bars."""
+    """
+    Context manager that provides a progress indicator for long-running operations.
+    
+    When a Rich Console is available (global `console` is set) this yields a Rich progress task object
+    that can be updated with `progress.update(...)` inside the context. If a numeric `total` is
+    provided the progress bar is determinate and reports percentage; otherwise an indeterminate
+    spinner and description are shown.
+    
+    When no Rich Console is available this prints simple "Starting: ..." and "Completed: ..." lines
+    and yields None.
+    
+    Parameters:
+        description: Short description shown alongside the progress indicator.
+        total: Optional total work units for a determinate progress bar. If omitted or None, an
+            indeterminate spinner is used.
+    
+    Yields:
+        A Rich progress task handle when Rich is available, otherwise None.
+    """
     if console and total is not None:
         with Progress(
             SpinnerColumn(),
@@ -112,7 +153,25 @@ def progress_context(description: str, total: Optional[int] = None):
 
 
 def create_parser() -> argparse.ArgumentParser:
-    """Create the main argument parser."""
+    """
+    Create and return the top-level argparse.ArgumentParser for the CLI.
+    
+    The parser configures global options and the following subcommands with their key options:
+    - serve: start Gradio web UI (--port, --host, --share, --auth, --ssl-keyfile, --ssl-certfile)
+    - run: execute a single content-generation task (--topic, --platforms, --brand-bible-file, --content-type, --target-audience, --output-format, --output-file, --dry-run)
+    - config: manage configuration with subcommands:
+        - generate (--output, --format)
+        - validate (--file)
+        - show (--format)
+    - validate: validate an input data file (--input, --format)
+    - health: run system health checks (--detailed)
+    - info: display system and environment information
+    
+    Also provides global flags such as --config-file, --log-level, --log-format, --log-file, --no-color, --verbose, and --version.
+    
+    Returns:
+        argparse.ArgumentParser: Configured parser ready for argument parsing.
+    """
     parser = argparse.ArgumentParser(
         prog="virtual-pr-firm",
         description="Virtual PR Firm - AI-powered content generation for social media platforms",
@@ -371,7 +430,18 @@ Examples:
 
 
 def load_config(config_file: Optional[str] = None) -> Dict[str, Any]:
-    """Load configuration from file and environment."""
+    """
+    Load application configuration from the given file path or the environment and return a normalized settings dictionary.
+    
+    Parameters:
+        config_file (Optional[str]): Path to a configuration file. If None, uses the default discovery order (environment, default locations).
+    
+    Returns:
+        Dict[str, Any]: A structured dict with top-level sections: 'debug', 'environment', 'logging', 'gradio', 'llm', 'flow', and 'security'. Each section contains the corresponding runtime and client settings (e.g., logging.level, gradio.port, llm.provider, flow.enable_caching, security.enable_auth).
+    
+    Raises:
+        CLIError: If underlying configuration loading or validation fails (wraps ConfigurationError).
+    """
     try:
         config = get_config(config_file)
         return {
@@ -428,7 +498,17 @@ def load_config(config_file: Optional[str] = None) -> Dict[str, Any]:
 
 
 def setup_logging(args: argparse.Namespace, config: Dict[str, Any]):
-    """Setup logging based on arguments and configuration."""
+    """
+    Configure application logging.
+    
+    CLI-provided values in `args` take precedence over values in `config['logging']`. Calls the project's
+    `configure_logging` helper with resolved level, format, file, max size, backup count, and correlation-id inclusion.
+    
+    Parameters:
+        args (argparse.Namespace): Parsed command-line arguments (expects `log_level`, `log_format`, `log_file`).
+        config (dict): Loaded configuration dictionary containing a `logging` section with keys
+            `level`, `format`, `file`, `max_size`, `backup_count`, and `correlation_id`.
+    """
     log_level = args.log_level or config['logging']['level']
     log_format = args.log_format or config['logging']['format']
     log_file = args.log_file or config['logging']['file']
@@ -444,7 +524,11 @@ def setup_logging(args: argparse.Namespace, config: Dict[str, Any]):
 
 
 def cmd_serve(args: argparse.Namespace, config: Dict[str, Any]):
-    """Handle the serve command."""
+    """
+    Start and launch the Gradio web interface for the application.
+    
+    Requires Gradio to be installed; constructs and passes launch options from the provided CLI namespace and then calls the app's launch method. The following fields are read from `args`: `port`, `host`, `share`, `auth` (expected as "user:pass"), `ssl_keyfile`, `ssl_certfile`, and `verbose`. Prints informational messages and will raise CLIError if Gradio is not available or if the interface fails to start.
+    """
     if not GRADIO_AVAILABLE:
         raise CLIError("Gradio is not installed. Install with: pip install gradio")
     
@@ -485,7 +569,33 @@ def cmd_serve(args: argparse.Namespace, config: Dict[str, Any]):
 
 
 def cmd_run(args: argparse.Namespace, config: Dict[str, Any]):
-    """Handle the run command."""
+    """
+    Run a single content-generation task from CLI arguments.
+    
+    Parses platforms and optional brand bible, validates the assembled task requirements, optionally performs a dry run, initializes caching, executes the main content-generation flow, and emits results to stdout or a file in JSON, YAML, or plain-text formats.
+    
+    Parameters:
+        args (argparse.Namespace): Parsed CLI arguments. Expected attributes used by this command:
+            - platforms (str): Comma-separated platform identifiers.
+            - brand_bible_file (Optional[str]): Path to an XML brand bible file.
+            - topic (str): Topic or goal for the content.
+            - content_type (str): Desired content type.
+            - target_audience (Optional[str]): Target audience description.
+            - dry_run (bool): If True, validate inputs but do not execute the flow.
+            - output_format (str): One of 'json', 'yaml', or 'text'.
+            - output_file (Optional[str]): Path to write output; if omitted, prints to stdout.
+        config (dict): Application configuration dictionary (used for flow/cache initialization).
+    
+    Side effects:
+        - May read the brand bible file.
+        - Initializes and uses the cache manager.
+        - Runs the main content-generation flow which may produce side effects in shared state.
+        - Writes output to disk if --output-file is specified, or prints to stdout.
+        - Exits process with code 1 on validation failures.
+    
+    Raises:
+        CLIError: On unexpected failures during execution (wraps the original exception).
+    """
     print_info("Running content generation task...")
     
     try:
@@ -581,7 +691,19 @@ def cmd_run(args: argparse.Namespace, config: Dict[str, Any]):
 
 
 def cmd_config_generate(args: argparse.Namespace, config: Dict[str, Any]):
-    """Handle the config generate command."""
+    """
+    Create a configuration template file at the path specified by args.output.
+    
+    If a file already exists at that path, prompts the user to confirm overwrite (expects 'y' to proceed).
+    On success prints a confirmation and a short guidance message. On failure logs context and raises CLIError.
+    
+    Parameters:
+        args (argparse.Namespace): Command arguments; must include `output` (path to write the template).
+        config (Dict[str, Any]): Current application configuration (not used to generate the template but provided for command consistency).
+    
+    Raises:
+        CLIError: If template generation fails for any reason.
+    """
     try:
         output_path = Path(args.output)
         
@@ -603,7 +725,20 @@ def cmd_config_generate(args: argparse.Namespace, config: Dict[str, Any]):
 
 
 def cmd_config_validate(args: argparse.Namespace, config: Dict[str, Any]):
-    """Handle the config validate command."""
+    """
+    Validate a configuration file and display a brief summary.
+    
+    Validates the configuration located at the path specified by args.file using load_config().
+    On success prints a confirmation and a short summary (number of sections) and renders
+    a small table of example keys/values when Rich's console is available; otherwise lists section names.
+    
+    Parameters:
+        args (argparse.Namespace): Command-line namespace; must provide `file` (path to config file).
+        config (dict): Active application configuration (passed through command dispatch, not modified).
+    
+    Raises:
+        CLIError: If the config file does not exist or validation fails.
+    """
     try:
         config_file = Path(args.file)
         
@@ -642,7 +777,19 @@ def cmd_config_validate(args: argparse.Namespace, config: Dict[str, Any]):
 
 
 def cmd_config_show(args: argparse.Namespace, config: Dict[str, Any]):
-    """Handle the config show command."""
+    """
+    Print the current application configuration to stdout in JSON or YAML format.
+    
+    If args.format == 'json', the configuration dictionary is serialized with json.dumps(indent=2, default=str).
+    Otherwise the configuration is serialized as YAML via yaml.dump. Writes the resulting text to stdout.
+    
+    Parameters:
+        args: argparse.Namespace with at least a `format` attribute ('json' for JSON output; any other value yields YAML).
+        config: Mapping of configuration values to be serialized and displayed.
+    
+    Raises:
+        CLIError: If serialization or printing fails.
+    """
     try:
         if args.format == 'json':
             output = json.dumps(config, indent=2, default=str)
@@ -657,7 +804,19 @@ def cmd_config_show(args: argparse.Namespace, config: Dict[str, Any]):
 
 
 def cmd_validate(args: argparse.Namespace, config: Dict[str, Any]):
-    """Handle the validate command."""
+    """
+    Validate an input JSON or YAML file against the shared store schema and print a brief summary.
+    
+    This command handler:
+    - Ensures the input file exists.
+    - Determines format from --format or the file extension ('.yaml' / '.yml' -> YAML, '.json' -> JSON).
+    - Loads the file and validates its contents with validate_shared_store().
+    - Prints a short summary of discovered task requirements (platform count and topic).
+    
+    Behavior:
+    - On schema validation failures (ValidationError) it prints per-field errors and exits the process with code 1.
+    - On other unexpected failures it logs context and raises CLIError.
+    """
     try:
         input_file = Path(args.input)
         
@@ -707,7 +866,18 @@ def cmd_validate(args: argparse.Namespace, config: Dict[str, Any]):
 
 
 def cmd_health(args: argparse.Namespace, config: Dict[str, Any]):
-    """Handle the health command."""
+    """
+    Run a system health check and report status for key components.
+    
+    Performs lightweight checks for optional dependencies (Gradio, Rich), configuration loading, data validation, and cache initialization, then prints a summary table (uses Rich when available). If all checks pass prints a success message; if any check fails prints a warning and exits the process with status code 1.
+    
+    Parameters:
+        args (argparse.Namespace): Parsed CLI arguments (used only for logging context on errors).
+        config (dict): Application configuration; used for testing components such as cache initialization.
+    
+    Raises:
+        CLIError: If an unexpected error occurs while performing the health check.
+    """
     try:
         print_info("Performing system health check...")
         
@@ -783,7 +953,18 @@ def cmd_health(args: argparse.Namespace, config: Dict[str, Any]):
 
 
 def cmd_info(args: argparse.Namespace, config: Dict[str, Any]):
-    """Handle the info command."""
+    """
+    Print system and environment information to the user.
+    
+    Displays application version, Python version, platform, architecture, processor, and availability of optional dependencies. When Rich is available it renders a formatted table to the global console; otherwise it writes a plain-text listing to stdout.
+    
+    Parameters:
+        args (argparse.Namespace): Parsed CLI arguments (used only for logging context on error).
+        config (dict): Application configuration (not used by this command).
+    
+    Raises:
+        CLIError: If gathering or displaying system information fails.
+    """
     try:
         import platform
         import sys
@@ -831,7 +1012,26 @@ def cmd_info(args: argparse.Namespace, config: Dict[str, Any]):
 
 
 def main():
-    """Main CLI entry point."""
+    """
+    CLI entry point — parse arguments, load config, set up logging, and dispatch subcommands.
+    
+    This function:
+    - Builds and parses the command-line arguments.
+    - Loads application configuration and initializes logging.
+    - Creates a request logging context and dispatches to the selected subcommand handler
+      (serve, run, config [generate|validate|show], validate, health, info).
+    - Honors the --no-color flag by disabling Rich console colors if available.
+    
+    Behavior and exit codes:
+    - If no subcommand is provided or an invalid subcommand is used, prints help and exits with code 1.
+    - On a handled CLIError, prints a user-friendly error message and exits with code 1.
+    - On KeyboardInterrupt, prints a cancellation message and exits with code 130.
+    - On any other unexpected exception, logs the error, prints an error message, optionally prints a traceback when --verbose is set, and exits with code 1.
+    
+    Side effects:
+    - May write to stdout/stderr (help, informational and error messages).
+    - Terminates the process via sys.exit(...) on error conditions or when help is shown.
+    """
     parser = create_parser()
     args = parser.parse_args()
     

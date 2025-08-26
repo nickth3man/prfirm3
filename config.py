@@ -113,11 +113,35 @@ class ConfigManager:
     """Manages application configuration with hierarchical loading."""
     
     def __init__(self, config_file: Optional[str] = None):
+        """
+        Initialize a ConfigManager.
+        
+        Parameters:
+            config_file (Optional[str]): Path to a YAML/JSON configuration file to load. If None, only defaults and environment overrides are used.
+        
+        Description:
+            Stores the optional config file path and prepares an internal cached AppConfig (initially None) that will be populated when load() is called.
+        """
         self.config_file = config_file
         self._config: Optional[AppConfig] = None
     
     def load(self) -> AppConfig:
-        """Load configuration using hierarchical precedence."""
+        """
+        Load and return the application configuration, merged from defaults, an optional config file, and environment variables.
+        
+        Performs a hierarchical merge in this order:
+        1. default values
+        2. values from the configured YAML/JSON file (if provided)
+        3. environment variable overrides
+        
+        The result is validated, cached, and returned.
+        
+        Returns:
+            AppConfig: The merged and validated application configuration.
+        
+        Raises:
+            ConfigurationError: If validation of the merged configuration fails.
+        """
         if self._config is not None:
             return self._config
         
@@ -138,11 +162,26 @@ class ConfigManager:
         return config
     
     def _get_defaults(self) -> AppConfig:
-        """Get default configuration."""
+        """
+        Return a new AppConfig populated with module defaults.
+        
+        Returns:
+            AppConfig: A fresh AppConfig instance with default values for all sub-configurations.
+        """
         return AppConfig()
     
     def _load_config_file(self) -> Dict[str, Any]:
-        """Load configuration from file."""
+        """
+        Load configuration from the configured file path.
+        
+        Attempts to read and parse the file at self.config_file. Supports YAML (".yaml", ".yml") via yaml.safe_load and JSON (".json") via json.load. If the file path is not set or the file does not exist, or if parsing fails, an empty dict is returned. If the file has an unsupported extension, raises ConfigurationError.
+        
+        Returns:
+            dict: The parsed configuration as a dictionary, or an empty dict on missing file or parse error.
+        
+        Raises:
+            ConfigurationError: If the file has an unsupported extension.
+        """
         if not self.config_file or not Path(self.config_file).exists():
             return {}
         
@@ -159,7 +198,24 @@ class ConfigManager:
             return {}
     
     def _load_from_env(self) -> Dict[str, Any]:
-        """Load configuration from environment variables."""
+        """
+        Builds a nested override dictionary from environment variables to apply on top of defaults.
+        
+        Reads specific environment variables and converts them into typed values placed into sections matching the AppConfig structure (top-level keys: debug, environment, logging, gradio, llm, security). Parsing behavior and mappings:
+        - Booleans: parsed case-insensitively from ('true', '1', 'yes').
+        - Integers: parsed via int() for port and rate-limit values.
+        - DEMO_PASSWORD → gradio.auth: stored as "admin:<password>".
+        - OPENAI_API_KEY and ANTHROPIC_API_KEY → llm.api_key (the last one present wins).
+        - Supported environment variables:
+          - App: DEBUG (bool), ENVIRONMENT (str)
+          - Logging: LOG_LEVEL (str), LOG_FORMAT (str), LOG_FILE (str)
+          - Gradio: GRADIO_PORT (int), GRADIO_HOST (str), GRADIO_SHARE (bool), DEMO_PASSWORD (str)
+          - LLM: LLM_PROVIDER (str), LLM_MODEL (str), OPENAI_API_KEY (str), ANTHROPIC_API_KEY (str), LLM_BASE_URL (str)
+          - Security: ENABLE_AUTH (bool), RATE_LIMIT_REQUESTS (int)
+        
+        Returns:
+            Dict[str, Any]: A nested dict of overrides suitable for deep-merging into the default configuration.
+        """
         config = {}
         
         # App-level settings
@@ -207,7 +263,16 @@ class ConfigManager:
         return config
     
     def _merge_config(self, base: AppConfig, override: Dict[str, Any]) -> AppConfig:
-        """Merge configuration dictionaries."""
+        """
+        Return a new AppConfig created by deep-merging a nested override dictionary into a base AppConfig.
+        
+        Parameters:
+            base (AppConfig): The source configuration to use as defaults.
+            override (Dict[str, Any]): A nested dictionary of overrides to apply on top of `base`. Keys map to AppConfig fields and nested sub-config sections.
+        
+        Returns:
+            AppConfig: A new AppConfig instance representing the result of merging `override` on top of `base`. The original `base` is not modified.
+        """
         if not override:
             return base
         
@@ -221,7 +286,21 @@ class ConfigManager:
         return self._dict_to_config(merged)
     
     def _config_to_dict(self, config: AppConfig) -> Dict[str, Any]:
-        """Convert AppConfig to dictionary."""
+        """
+        Convert an AppConfig (or nested config dataclass) into a plain dictionary.
+        
+        Recursively traverses the given config object's attributes and converts any nested objects
+        that expose a __dict__ into dictionaries so the entire configuration tree becomes
+        serializable as standard Python dictionaries and primitive values.
+        
+        Parameters:
+            config (AppConfig): Top-level configuration object (or any nested config object)
+                to convert.
+        
+        Returns:
+            Dict[str, Any]: A dictionary representation of the configuration with nested
+            sections converted to dictionaries.
+        """
         result = {}
         for field_name, field_value in config.__dict__.items():
             if hasattr(field_value, '__dict__'):
@@ -231,7 +310,25 @@ class ConfigManager:
         return result
     
     def _dict_to_config(self, config_dict: Dict[str, Any]) -> AppConfig:
-        """Convert dictionary to AppConfig."""
+        """
+        Convert a nested plain dictionary into an AppConfig instance.
+        
+        Takes a mapping of configuration values (typically produced by merging defaults,
+        file, and environment overrides) and constructs typed sub-config dataclasses
+        (LoggingConfig, GradioConfig, LLMConfig, FlowConfig, SecurityConfig) which are
+        assembled into the returned AppConfig. Missing top-level or sub-config keys
+        will be filled with the dataclasses' defaults; values present in the dictionary
+        are passed to the corresponding dataclass constructors.
+        
+        Parameters:
+            config_dict (Dict[str, Any]): Nested configuration dictionary with optional
+                top-level keys like "debug", "environment", "log_level", "log_format",
+                "log_file", "logging", "gradio", "llm", "flow", "security", and "custom".
+        
+        Returns:
+            AppConfig: Fully constructed application configuration object reflecting
+            the provided overrides merged with dataclass defaults.
+        """
         # Handle sub-configurations
         logging_config = LoggingConfig(**config_dict.get('logging', {}))
         gradio_config = GradioConfig(**config_dict.get('gradio', {}))
@@ -255,7 +352,21 @@ class ConfigManager:
         )
     
     def _deep_merge(self, base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-        """Recursively merge dictionaries."""
+        """
+        Deep-merge two mapping objects and return a new dictionary.
+        
+        Performs a recursive merge of `override` into `base`: when a key exists in both and both
+        values are dictionaries, their contents are merged recursively; otherwise the value from
+        `override` replaces the one from `base`. The inputs are not mutated — a shallow copy of
+        `base` is created and returned with overrides applied.
+        
+        Parameters:
+            base (Dict[str, Any]): The base mapping to merge into.
+            override (Dict[str, Any]): Mapping whose values override or extend `base`.
+        
+        Returns:
+            Dict[str, Any]: A new dictionary with `override` applied on top of `base`.
+        """
         result = base.copy()
         for key, value in override.items():
             if key in result and isinstance(result[key], dict) and isinstance(value, dict):
@@ -265,7 +376,22 @@ class ConfigManager:
         return result
     
     def _validate_config(self, config: AppConfig) -> None:
-        """Validate configuration values."""
+        """
+        Validate critical AppConfig fields and raise ConfigurationError on invalid values.
+        
+        Performs the following checks:
+        - logging.level must be one of: DEBUG, INFO, WARNING, ERROR, CRITICAL (case-insensitive).
+        - gradio.port must be an integer in the range 1–65535.
+        - llm.provider must be one of: 'openai', 'anthropic', 'openrouter'.
+        - llm.temperature must be within 0.0–2.0 inclusive.
+        - flow.timeout and llm.timeout must be positive.
+        
+        Parameters:
+            config (AppConfig): The configuration instance to validate.
+        
+        Raises:
+            ConfigurationError: If any validation rule is violated (message describes the invalid field).
+        """
         # Validate logging level
         valid_log_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
         if config.logging.level.upper() not in valid_log_levels:
@@ -293,13 +419,36 @@ class ConfigManager:
 
 @lru_cache(maxsize=1)
 def get_config(config_file: Optional[str] = None) -> AppConfig:
-    """Get application configuration with caching."""
+    """
+    Load and return the application's AppConfig, using an internal cache to avoid repeated parsing.
+    
+    If a config_file path is provided, its settings (YAML or JSON) are merged over built-in defaults and then environment variable overrides are applied. The resulting configuration is validated before being returned and cached for subsequent calls.
+    
+    Parameters:
+        config_file (Optional[str]): Path to a YAML or JSON config file to merge over defaults. If None, only defaults and environment overrides are used.
+    
+    Returns:
+        AppConfig: The merged, validated application configuration.
+    
+    Raises:
+        ConfigurationError: If the configuration file is an unsupported format or the final configuration fails validation.
+    """
     config_manager = ConfigManager(config_file)
     return config_manager.load()
 
 
 def configure_logging(config: AppConfig) -> None:
-    """Configure logging based on application configuration."""
+    """
+    Configure the Python logging system according to the provided AppConfig.
+    
+    This sets the root logger level, installs a console handler (and a rotating file handler if
+    config.logging.file is set), selects either a JSON-style or human-readable formatter based
+    on config.logging.format, and forces the logging configuration. If config.logging.correlation_id
+    is enabled, initializes a module-level placeholder (logging.correlation_id) for per-request use.
+    
+    Parameters:
+        config (AppConfig): Application configuration containing the `logging` sub-config.
+    """
     import logging.config
     
     # Determine log level
@@ -353,7 +502,19 @@ def configure_logging(config: AppConfig) -> None:
 
 
 def create_config_template(output_path: str = "config.yaml") -> None:
-    """Create a configuration template file."""
+    """
+    Write a YAML configuration template containing all top-level and sub-config defaults.
+    
+    Creates a YAML file at `output_path` with the canonical configuration structure (debug, environment,
+    logging, gradio, llm, flow, security, and custom) populated with sensible defaults. If the file
+    already exists it will be overwritten.
+    
+    Parameters:
+        output_path (str): Filesystem path where the YAML template will be written (default: "config.yaml").
+    
+    Returns:
+        None
+    """
     template = {
         "debug": False,
         "environment": "development",

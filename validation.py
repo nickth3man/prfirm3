@@ -38,6 +38,14 @@ class ValidationError(Exception):
     """Raised when validation fails."""
     
     def __init__(self, errors: List[ValidationError]):
+        """
+        Initialize the ValidationError exception that aggregates multiple field errors.
+        
+        Parameters:
+            errors (List[ValidationError]): List of ValidationError dataclass instances to attach to this exception.
+        
+        The provided list is stored on the instance as `.errors`. The exception message is set to indicate the number of contained errors.
+        """
         self.errors = errors
         super().__init__(f"Validation failed: {len(errors)} errors")
 
@@ -81,10 +89,20 @@ class InputValidator:
     MIN_TOPIC_LENGTH = 1
     
     def __init__(self):
+        """
+        Initialize the validator instance.
+        
+        Compiles the module-level SPAM_PATTERNS into case-insensitive regular expression objects
+        and stores them on self.spam_patterns for reuse by spam-detection routines.
+        """
         self.spam_patterns = [re.compile(pattern, re.IGNORECASE) for pattern in self.SPAM_PATTERNS]
     
     def validate_shared_store(self, shared: Dict[str, Any]) -> ValidationResult:
-        """Validate the complete shared store structure."""
+        """
+        Validate the complete shared store structure and produce a sanitized copy when valid.
+        
+        Performs type check on `shared` (must be a dict), validates required fields under `task_requirements` (platforms, topic_or_goal, optional content_type and target_audience), validates optional `brand_bible` (xml content and file path), and validates the optional `stream` entry. Returns a ValidationResult where `is_valid` is True only if no validation errors were found; when valid `sanitized_data` contains a sanitized copy of the input (normalized platforms, cleaned text and XML). If `shared` is not a dict, returns a single `type_error` validation error.
+        """
         errors = []
         
         # Basic structure validation
@@ -119,7 +137,19 @@ class InputValidator:
         )
     
     def _validate_task_requirements(self, task_req: Any) -> List[ValidationError]:
-        """Validate task_requirements section."""
+        """
+        Validate the `task_requirements` section of input and return any field-level validation errors.
+        
+        Expects `task_req` to be a dict containing at minimum:
+        - "platforms": a non-empty list of platform identifiers (validated/normalized via _validate_platforms)
+        - "topic_or_goal": a topic/goal string (validated via _validate_topic)
+        
+        Optionally validates:
+        - "content_type" (validated via _validate_content_type)
+        - "target_audience" (validated via _validate_target_audience)
+        
+        Returns a list of ValidationError objects describing each problem found. If `task_req` is None or not a dict, a single ValidationError describing the missing or wrong-typed top-level value is returned.
+        """
         errors = []
         
         if task_req is None:
@@ -174,7 +204,14 @@ class InputValidator:
         return errors
     
     def _validate_platforms(self, platforms: Any) -> List[ValidationError]:
-        """Validate and normalize platform names."""
+        """
+        Validate the 'platforms' entry in task_requirements.
+        
+        Checks that `platforms` is a non-empty list of non-empty strings and that each entry maps to a supported canonical platform name (aliases are accepted). Does not modify the input; any unsupported, missing, or mistyped entries are reported.
+        
+        Returns:
+            List[ValidationError]: A list of validation errors found. Empty list means the platforms value passed validation.
+        """
         errors = []
         
         if not isinstance(platforms, list):
@@ -230,7 +267,17 @@ class InputValidator:
         return errors
     
     def _validate_topic(self, topic: Any) -> List[ValidationError]:
-        """Validate topic content."""
+        """
+        Validate the task_requirements.topic_or_goal value and return any validation issues.
+        
+        Performs these checks and returns a list of ValidationError instances for each violation:
+        - Type: must be a string.
+        - Whitespace trimming, then length: must be between MIN_TOPIC_LENGTH and MAX_TOPIC_LENGTH.
+        - Content: rejects texts matching spam patterns.
+        - Character composition: rejects topics with an excessive ratio of special characters (>30%).
+        
+        Errors use the field "task_requirements.topic_or_goal" and include codes such as "type_error", "too_short", "too_long", "spam_content", and "excessive_special_chars".
+        """
         errors = []
         
         if not isinstance(topic, str):
@@ -278,7 +325,15 @@ class InputValidator:
         return errors
     
     def _validate_brand_bible(self, brand_bible: Any) -> List[ValidationError]:
-        """Validate brand bible content."""
+        """
+        Validate the optional brand bible structure and its contents.
+        
+        Accepts None or a dict. If provided, the dict may include:
+        - "xml_raw": raw XML content (validated for type, size, and safety via _validate_xml_content).
+        - "file_path": path to a brand bible file (validated for existence, size, extension via _validate_file_path).
+        
+        Returns a list of ValidationError objects describing any problems found; an empty list means the brand bible is valid or was not provided.
+        """
         errors = []
         
         if brand_bible is None:
@@ -308,7 +363,23 @@ class InputValidator:
         return errors
     
     def _validate_xml_content(self, xml_raw: Any) -> List[ValidationError]:
-        """Validate XML content."""
+        """
+        Validate a raw brand-bible XML string and return any validation errors.
+        
+        Performs the following checks and returns a list of ValidationError for each failing rule:
+        - Type: value must be a string.
+        - Size: must not exceed MAX_FILE_SIZE bytes.
+        - Basic structure: non-empty content must start with '<'.
+        - Safety: rejects content that matches dangerous XML constructs (checked via _contains_dangerous_xml).
+        
+        Errors use the field name "brand_bible.xml_raw" and may include codes such as "type_error", "file_too_large", "invalid_xml", and "dangerous_xml".
+        
+        Parameters:
+            xml_raw (Any): Raw XML content to validate (expected to be a string).
+        
+        Returns:
+            List[ValidationError]: A list of validation errors; empty if the content is valid.
+        """
         errors = []
         
         if not isinstance(xml_raw, str):
@@ -346,7 +417,27 @@ class InputValidator:
         return errors
     
     def _validate_file_path(self, file_path: Any) -> List[ValidationError]:
-        """Validate file path."""
+        """
+        Validate a filesystem path intended for a brand bible file and return any validation issues.
+        
+        Checks performed:
+        - Ensures `file_path` is a string representing a filesystem path.
+        - Verifies the file exists and is accessible.
+        - Validates the file size does not exceed InputValidator.MAX_FILE_SIZE.
+        - Validates the file extension is one of the allowed types: .xml, .json, .txt, .yaml, .yml.
+        
+        Parameters:
+            file_path: Expected to be a filesystem path provided as a string.
+        
+        Returns:
+            List[ValidationError]: A list of ValidationError instances describing any problems found.
+                Possible error codes included in the list:
+                - "type_error": `file_path` was not a string.
+                - "file_not_found": the path does not point to an existing file.
+                - "file_access_error": filesystem access to the path failed (OS error).
+                - "file_too_large": file size exceeds MAX_FILE_SIZE (size included in the message).
+                - "invalid_file_extension": file extension is not one of the allowed set.
+        """
         errors = []
         
         if not isinstance(file_path, str):
@@ -396,7 +487,18 @@ class InputValidator:
         return errors
     
     def _validate_stream(self, stream: Any) -> List[ValidationError]:
-        """Validate stream configuration."""
+        """
+        Validate a stream configuration value.
+        
+        Accepts either a boolean or a dict. If the value is invalid, returns a list of ValidationError entries describing the problems.
+        
+        Validation rules:
+        - If not a bool or dict: returns a single ValidationError with field "stream" and code "type_error".
+        - If a dict and contains an "enabled" key: "enabled" must be a boolean; otherwise a ValidationError with field "stream.enabled" and code "type_error" is returned.
+        
+        Returns:
+            List[ValidationError]: Empty list when valid, otherwise one or more ValidationError instances.
+        """
         errors = []
         
         if not isinstance(stream, (bool, dict)):
@@ -419,7 +521,14 @@ class InputValidator:
         return errors
     
     def _validate_content_type(self, content_type: Any) -> List[ValidationError]:
-        """Validate content type."""
+        """
+        Validate the task requirement content type and return any validation errors.
+        
+        Checks that `content_type` is a string and (case-insensitively) one of the allowed types:
+        press_release, social_post, blog_post, email, newsletter, announcement, update, story.
+        
+        Returns a list of ValidationError objects describing problems; returns an empty list when valid.
+        """
         errors = []
         
         if not isinstance(content_type, str):
@@ -445,7 +554,17 @@ class InputValidator:
         return errors
     
     def _validate_target_audience(self, audience: Any) -> List[ValidationError]:
-        """Validate target audience."""
+        """
+        Validate the `target_audience` value in task requirements.
+        
+        Checks that `audience` is a string and enforces length constraints (minimum 3 trimmed characters, maximum 200 characters). Returns a list of ValidationError instances describing any problems; if the list is empty, the value passed validation.
+        
+        Parameters:
+            audience: The value to validate (expected to be a string).
+        
+        Returns:
+            List[ValidationError]: One or more validation errors; empty list when valid.
+        """
         errors = []
         
         if not isinstance(audience, str):
@@ -473,7 +592,11 @@ class InputValidator:
         return errors
     
     def _contains_spam_content(self, text: str) -> bool:
-        """Check if text contains spam patterns."""
+        """
+        Return True if the given text matches any configured spam pattern.
+        
+        Performs a case-insensitive check against this validator's compiled spam patterns and returns True on the first match; otherwise returns False.
+        """
         text_lower = text.lower()
         for pattern in self.spam_patterns:
             if pattern.search(text_lower):
@@ -481,7 +604,11 @@ class InputValidator:
         return False
     
     def _contains_dangerous_xml(self, xml_content: str) -> bool:
-        """Check for potentially dangerous XML content."""
+        """
+        Return True if the provided XML-like content contains constructs considered potentially dangerous.
+        
+        Performs case-insensitive regex checks for common risky patterns including CDATA sections, DOCTYPE/ENTITY declarations, embedded script/iframe/object/embed tags, and dangerous URI schemes (e.g., `javascript:`, `vbscript:`, `data:`). Returns False when none of these patterns are found.
+        """
         dangerous_patterns = [
             r'<!\[CDATA\[.*?\]\]>',  # CDATA sections
             r'<!DOCTYPE.*?>',        # DOCTYPE declarations
@@ -501,7 +628,16 @@ class InputValidator:
         return False
     
     def _sanitize_shared_store(self, shared: Dict[str, Any]) -> Dict[str, Any]:
-        """Sanitize the shared store data."""
+        """
+        Return a sanitized shallow copy of the shared store suitable for downstream use.
+        
+        Creates and returns a copy of `shared` with targeted sanitization applied:
+        - task_requirements.platforms: normalized to canonical platform names.
+        - task_requirements.topic_or_goal: whitespace-collapsed, control characters removed, and truncated to the configured maximum length.
+        - brand_bible.xml_raw: dangerous XML constructs removed.
+        
+        The original `shared` object is not modified; unspecified keys are preserved as-is in the returned dictionary.
+        """
         sanitized = shared.copy()
         
         # Sanitize task_requirements
@@ -528,7 +664,17 @@ class InputValidator:
         return sanitized
     
     def _normalize_platforms(self, platforms: List[str]) -> List[str]:
-        """Normalize platform names to canonical form."""
+        """
+        Normalize a list of platform identifiers to the module's canonical platform names.
+        
+        Leading/trailing whitespace is stripped and comparison is case-insensitive. Any input entries that do not match a known alias are omitted. The returned list preserves the order of matched inputs and may contain duplicates if the input contains duplicates or multiple aliases that map to the same canonical name.
+        
+        Parameters:
+            platforms (List[str]): Platform identifiers (names or aliases) to normalize.
+        
+        Returns:
+            List[str]: List of canonical platform names corresponding to recognized inputs.
+        """
         normalized = []
         for platform in platforms:
             platform_lower = platform.strip().lower()
@@ -539,7 +685,17 @@ class InputValidator:
         return normalized
     
     def _sanitize_text(self, text: str) -> str:
-        """Sanitize text content."""
+        """
+        Sanitize and normalize an input text string.
+        
+        Converts non-string inputs to str, collapses repeated internal whitespace to single spaces and trims ends, removes control characters except for newline, carriage return, and tab, and truncates the result to MAX_TOPIC_LENGTH.
+         
+        Parameters:
+            text (str | any): The input to sanitize; non-strings will be converted to str.
+        
+        Returns:
+            str: The sanitized, normalized text suitable for downstream use.
+        """
         if not isinstance(text, str):
             return str(text)
         
@@ -556,7 +712,11 @@ class InputValidator:
         return text
     
     def _sanitize_xml(self, xml_content: str) -> str:
-        """Sanitize XML content."""
+        """
+        Sanitize XML-like content by removing dangerous constructs and risky protocols.
+        
+        If the input is not a string, it is converted to a string and returned. The sanitizer removes CDATA sections, DOCTYPE and ENTITY declarations, script/iframe/object/embed blocks, and strips risky protocols such as "javascript:", "vbscript:", and "data:". Returns the cleaned XML string suitable for safer parsing or storage.
+        """
         if not isinstance(xml_content, str):
             return str(xml_content)
         
@@ -588,12 +748,46 @@ class RateLimitValidator:
     """Rate limiting validation for request throttling."""
     
     def __init__(self, max_requests: int = 60, window_seconds: int = 60):
+        """
+        Initialize the rate limit validator.
+        
+        Parameters:
+            max_requests (int): Maximum number of allowed requests per client within the time window. Defaults to 60.
+            window_seconds (int): Time window duration in seconds for rate limiting. Defaults to 60.
+        
+        Notes:
+            Uses an in-memory `request_history` dict mapping client IDs to lists of request timestamps; this is suitable for single-process usage and testing only — use a centralized store (e.g., Redis) in production.
+        """
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self.request_history = {}  # In production, use Redis or similar
     
     def validate_rate_limit(self, client_id: str) -> Tuple[bool, Dict[str, Any]]:
-        """Validate if request is within rate limits."""
+        """
+        Check whether a client is within the configured rate limit and record the request when allowed.
+        
+        This method:
+        - Cleans up expired entries from the internal request history.
+        - Checks the number of requests the given client has made within the current rolling window.
+        - If the client has reached the limit, returns a rate-limited response (no new entry is recorded).
+        - If the client is under the limit, appends the current timestamp to the client's history and returns remaining allowance.
+        
+        Parameters:
+            client_id (str): Identifier for the client making the request.
+        
+        Returns:
+            Tuple[bool, Dict[str, Any]]: A tuple where the first element is True if the request is allowed, False if rate-limited.
+            The second element is a dict with:
+                - rate_limited (bool): True when the client has exceeded the allowed requests.
+                - time_until_reset (float): Seconds until the oldest recorded request falls out of the current window (0 when not provided or already expired). Present when rate_limited is True.
+                - requests_remaining (int): Number of additional requests the client may make in the current window (0 when rate_limited is True).
+                - limit (int): Configured maximum requests per window.
+                - window (int): Window duration in seconds.
+        
+        Side effects:
+            - Calls _cleanup_old_entries(current_time) to prune old timestamps.
+            - When allowed, appends the current epoch timestamp (time.time()) to self.request_history[client_id].
+        """
         import time
         current_time = time.time()
         
@@ -630,7 +824,16 @@ class RateLimitValidator:
         }
     
     def _cleanup_old_entries(self, current_time: float) -> None:
-        """Remove old request entries."""
+        """
+        Remove timestamps outside the current rate-limit window from the in-memory history.
+        
+        This mutates self.request_history in-place: for each client, timestamps older than
+        (current_time - self.window_seconds) are discarded. Any client with no remaining
+        timestamps is removed from self.request_history.
+        
+        Parameters:
+            current_time (float): Current time in seconds since the epoch used to compute the cutoff.
+        """
         cutoff_time = current_time - self.window_seconds
         
         for client_id in list(self.request_history.keys()):
@@ -650,10 +853,18 @@ rate_limit_validator = RateLimitValidator()
 
 
 def validate_shared_store(shared: Dict[str, Any]) -> None:
-    """Validate shared store and raise ValidationError if invalid.
+    """
+    Validate and sanitize the provided shared store in-place.
     
-    This is the main validation function used by the application.
-    It provides backward compatibility with the existing interface.
+    Validates the structure and fields of the given `shared` dictionary using the module's InputValidator.
+    If validation fails, raises ValidationError containing a list of field-specific errors.
+    If validation succeeds and sanitized data is produced, replaces the contents of `shared` with the sanitized copy.
+    
+    Parameters:
+        shared (dict): Mutable mapping representing the shared store to validate and sanitize.
+    
+    Raises:
+        ValidationError: Aggregates one or more validation issues when the input is invalid.
     """
     result = validator.validate_shared_store(shared)
     
@@ -667,12 +878,33 @@ def validate_shared_store(shared: Dict[str, Any]) -> None:
 
 
 def validate_rate_limit(client_id: str) -> Tuple[bool, Dict[str, Any]]:
-    """Validate rate limit for a client."""
+    """
+    Check whether the given client is within the configured rate limit window.
+    
+    Parameters:
+        client_id (str): Identifier for the client (e.g., API key, user id) to check.
+    
+    Returns:
+        Tuple[bool, dict]: A tuple where the first element is True if the client is allowed to proceed (within limit) or False if rate-limited.
+            The second element is a details dictionary:
+            - When allowed: contains at least "remaining" (int) — number of requests left in the current window.
+            - When rate-limited: contains at least "time_until_reset" (float) — seconds until the rate window resets.
+    """
     return rate_limit_validator.validate_rate_limit(client_id)
 
 
 def sanitize_text(text: str) -> str:
-    """Sanitize text content."""
+    """
+    Sanitize free-form text for safe downstream use.
+    
+    Collapses consecutive whitespace, removes control/control-like characters while preserving common whitespace (spaces, tabs, newlines), and truncates the result to the configured maximum topic length. Intended for user-provided topics/goals and other short text fields.
+    
+    Parameters:
+        text (str): Input text to sanitize.
+    
+    Returns:
+        str: Sanitized text.
+    """
     return validator._sanitize_text(text)
 
 
