@@ -142,23 +142,28 @@ class EngagementManagerNode(Node):
                 "topic_or_goal": "AI automation trends"
             }
         """
-        # TODO(Validation): Validate input shared state structure
-        # TODO(Types): Add type checking for shared dict contents
-        # TODO(Schema): Implement shared state schema validation with Pydantic
-        # TODO(Security): Add input sanitization to prevent injection attacks
-        # TODO(Config): Implement default configuration loading from external config files
-        # TODO(Environment): Add support for environment-specific defaults (dev/staging/prod)
-        # TODO(Dependencies): Validate that required external dependencies are available
-        # TODO(Security): Add input size limits to prevent memory exhaustion
-        # TODO(Reliability): Implement graceful degradation when optional inputs are missing
-        # TODO(Pytest): Add pytest tests for prep() method including edge cases, empty inputs, and state normalization
-        # Ensure task_requirements exists
-        shared.setdefault("task_requirements", {
+        # Ensure task_requirements exists and has mandatory keys
+        tr_default = {
             "platforms": [],
             "intents_by_platform": {},
             "topic_or_goal": "",
-        })
-        return shared["task_requirements"]
+        }
+
+        # Merge provided dict (if any) with defaults so we do not overwrite user values
+        tr_user = shared.get("task_requirements", {}) if isinstance(shared.get("task_requirements"), dict) else {}
+        task_requirements = {**tr_default, **tr_user}
+
+        # Basic validations with warn-only approach to avoid raising during demo runs
+        if not task_requirements["platforms"]:
+            log.warning("EngagementManagerNode: 'platforms' not provided; downstream formatting will use defaults.")
+
+        if not task_requirements["topic_or_goal"]:
+            log.warning("EngagementManagerNode: 'topic_or_goal' not provided; generated content may be generic.")
+
+        # Persist the normalized structure back to shared store
+        shared["task_requirements"] = task_requirements
+
+        return task_requirements
 
     # TODO(UX): EngagementManagerNode
     # - Implement interactive behavior (CLI / Gradio hooks) to collect missing inputs

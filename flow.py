@@ -49,13 +49,14 @@ def create_main_flow():
     # Wire the main pipeline
     engagement_manager >> brand_bible_ingest
     brand_bible_ingest >> voice_alignment
-    voice_alignment >> create_platform_formatting_flow()
-    
-    # TODO: Fix potential issue - create_platform_formatting_flow() is called twice
-    #       This might create duplicate flows or cause unexpected behavior
-    
-    # Connect formatting flow to content generation
+
+    # Create the platform formatting sub-flow once and reuse the instance to avoid
+    # duplicate graph branches that could lead to inconsistent execution order.
     formatting_flow = create_platform_formatting_flow()
+
+    # Connect the voice-aligned draft to the formatting flow and continue the
+    # pipeline with the formatted content.
+    voice_alignment >> formatting_flow
     formatting_flow >> content_craftsman
     content_craftsman >> style_editor
     

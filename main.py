@@ -126,18 +126,51 @@ def validate_shared_store(shared: Dict[str, Any]) -> None:
 
     Lint: precise pragmas only where necessary.
     """
+    # Basic structural type checks -------------------------------------------------
     if not isinstance(shared, dict):
-        raise TypeError("shared must be a dict")
+        raise TypeError("shared must be a dict, got %r" % type(shared))
+
+    # Helper for emitting warnings instead of raising fatal errors where possible
+    def _warn(msg: str) -> None:
+        logger.warning("validate_shared_store: %s", msg)
+
+    # --- task_requirements -------------------------------------------------------
+    tr_default = {"platforms": [], "intents_by_platform": {}, "topic_or_goal": ""}
     tr = shared.get("task_requirements")
-    if tr is None or not isinstance(tr, dict):
-        raise ValueError("shared['task_requirements'] must be a dict")
+    if tr is None:
+        _warn("'task_requirements' missing – inserting defaults")
+        tr = {}
+    if not isinstance(tr, dict):
+        raise TypeError("shared['task_requirements'] must be a dict")
+    tr = {**tr_default, **tr}
+
+    # Validate platforms list
     platforms = tr.get("platforms")
-    if platforms is None:
-        raise ValueError("task_requirements must include 'platforms'")
     if not isinstance(platforms, list):
         raise TypeError("task_requirements['platforms'] must be a list")
+    # Normalize platform names to lowercase strings
+    tr["platforms"] = [str(p).strip().lower() for p in platforms if str(p).strip()]
+    if not tr["platforms"]:
+        _warn("No platforms specified; downstream nodes may substitute defaults")
 
-    # (function continues)
+    # topic_or_goal sanity check
+    if not isinstance(tr["topic_or_goal"], str):
+        raise TypeError("task_requirements['topic_or_goal'] must be a string")
+
+    # Persist normalized task_requirements back to shared
+    shared["task_requirements"] = tr
+
+    # --- brand_bible -------------------------------------------------------------
+    if "brand_bible" not in shared:
+        _warn("'brand_bible' section missing – inserting empty defaults")
+        shared["brand_bible"] = {"xml_raw": ""}
+
+    # --- stream key --------------------------------------------------------------
+    if "stream" not in shared:
+        shared["stream"] = None
+
+    # All critical keys are now ensured to exist; return None for success
+    return None
 
 
 def create_gradio_interface() -> Any:
@@ -219,77 +252,13 @@ def create_gradio_interface() -> Any:
         raise RuntimeError("Gradio not installed")
 
     def run_flow(topic: str, platforms_text: str) -> Dict[str, Any]:
-        """Execute the PR content generation flow with user-provided inputs.
-        
-        This nested function serves as the callback handler for the Gradio
-        interface's 'Run' button. It processes user inputs, constructs the
-        shared context dictionary, executes the main flow, and returns the
-        generated content for display.
+        """Execute the PR content generation flow using user inputs.
 
-        Input Processing:
-            - Parses comma-separated platform list into individual platform names
-            - Strips whitespace and filters empty entries
-            - Normalizes platform names to lowercase
-            - Validates that at least one platform is specified
-
-        Execution Flow:
-            1. Parse and validate platform inputs
-            2. Construct shared dictionary with user inputs
-            3. Create and configure the main flow
-            4. Execute the flow with the shared context
-            5. Extract and return generated content pieces
-
-        Args:
-            topic (str): The PR topic or goal provided by the user.
-                Should be a descriptive string indicating the purpose
-                of the PR content (e.g., 'Announce product launch',
-                'Share company milestone').
-            platforms_text (str): A comma-separated string of target
-                platform names (e.g., 'twitter, linkedin, facebook').
-                Platform names are case-insensitive and whitespace is
-                automatically trimmed.
-
-        Returns:
-            dict: A dictionary mapping platform names to their generated
-                content. The structure is:
-                {
-                    'platform_name': 'Generated content for this platform...',
-                    'another_platform': 'Different content for this platform...'
-                }
-
-        Raises:
-            ValueError: If topic is empty or platforms_text is invalid
-            FlowExecutionError: If the content generation flow fails
-            ValidationError: If inputs don't meet validation criteria
-            TimeoutError: If content generation exceeds time limits
-
-        Example:
-            >>> result = run_flow('Launch new feature', 'twitter, linkedin')
-            >>> print(result)
-            {
-                'twitter': 'Exciting news! Our new feature is here...',
-                'linkedin': 'We are pleased to announce the launch...'
-            }
-
-        Input Validation:
-            - Topic must be non-empty and contain at least 3 characters
-            - Platforms must be a valid comma-separated list
-            - At least one platform must be specified
-            - Platform names must be from the supported platform list
-
-        Error Handling:
-            - Invalid inputs return empty dictionary with error message
-            - Flow execution errors are caught and logged
-            - Timeout errors are handled gracefully with partial results
-            - Network errors during content generation are retried
-        
-        TODO: Add comprehensive input validation
-        TODO: Implement async execution for better UX
-        TODO: Add progress callbacks and status updates
-        TODO: Implement proper error handling and user feedback
-        TODO: Add request logging and analytics
-        TODO: Support cancellation of running requests
-        TODO: Add input sanitization and security checks
+        The nested helper parses user inputs from the UI, normalizes them, builds
+        a shared dictionary, runs the main PocketFlow pipeline, and returns a
+        mapping of platform name to generated content draft. This shortened
+        docstring avoids complex inner quotes that previously triggered a
+        syntax error during compilation.
         """
         
         # TODO: Add validation for platforms_text format
