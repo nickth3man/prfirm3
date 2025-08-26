@@ -29,19 +29,63 @@ def create_main_flow():
     Returns:
         Flow: The complete orchestrated flow ready for execution
     """
-    # TODO: Evaluate the necessity of max_retries and wait parameters for each node.
-    #       Consider if default values are sufficient or if customization is required.
-    # TODO: Add configuration management for node parameters to make them configurable
-    #       without code changes (e.g., via config file or environment variables)
+    # Import configuration
+    try:
+        from utils.config import get_config
+        config = get_config()
+        CONFIG_AVAILABLE = True
+    except ImportError:
+        CONFIG_AVAILABLE = False
+        log.warning("Configuration management not available, using default node parameters")
     
-    # Initialize all nodes
-    engagement_manager = EngagementManagerNode(max_retries=2)
-    brand_bible_ingest = BrandBibleIngestNode(max_retries=2)
-    voice_alignment = VoiceAlignmentNode(max_retries=2)
-    content_craftsman = ContentCraftsmanNode(max_retries=3, wait=2)
-    style_editor = StyleEditorNode(max_retries=3, wait=1)
-    style_compliance = StyleComplianceNode(max_retries=2)
-    agency_director = AgencyDirectorNode()
+    # Initialize all nodes with configuration if available
+    if CONFIG_AVAILABLE:
+        engagement_config = config.get_node_config("EngagementManagerNode")
+        engagement_manager = EngagementManagerNode(
+            max_retries=engagement_config.max_retries,
+            wait=engagement_config.wait_time
+        )
+        
+        brand_config = config.get_node_config("BrandBibleIngestNode")
+        brand_bible_ingest = BrandBibleIngestNode(
+            max_retries=brand_config.max_retries,
+            wait=brand_config.wait_time
+        )
+        
+        voice_config = config.get_node_config("VoiceAlignmentNode")
+        voice_alignment = VoiceAlignmentNode(
+            max_retries=voice_config.max_retries,
+            wait=voice_config.wait_time
+        )
+        
+        craftsman_config = config.get_node_config("ContentCraftsmanNode")
+        content_craftsman = ContentCraftsmanNode(
+            max_retries=craftsman_config.max_retries,
+            wait=craftsman_config.wait_time
+        )
+        
+        editor_config = config.get_node_config("StyleEditorNode")
+        style_editor = StyleEditorNode(
+            max_retries=editor_config.max_retries,
+            wait=editor_config.wait_time
+        )
+        
+        compliance_config = config.get_node_config("StyleComplianceNode")
+        style_compliance = StyleComplianceNode(
+            max_retries=compliance_config.max_retries,
+            wait=compliance_config.wait_time
+        )
+        
+        agency_director = AgencyDirectorNode()
+    else:
+        # Fallback to hardcoded values
+        engagement_manager = EngagementManagerNode(max_retries=2)
+        brand_bible_ingest = BrandBibleIngestNode(max_retries=2)
+        voice_alignment = VoiceAlignmentNode(max_retries=2)
+        content_craftsman = ContentCraftsmanNode(max_retries=3, wait=2)
+        style_editor = StyleEditorNode(max_retries=3, wait=1)
+        style_compliance = StyleComplianceNode(max_retries=2)
+        agency_director = AgencyDirectorNode()
     
     # TODO: Add error handling and logging for flow construction failures
     # TODO: Consider implementing flow validation to ensure all connections are valid
@@ -49,13 +93,10 @@ def create_main_flow():
     # Wire the main pipeline
     engagement_manager >> brand_bible_ingest
     brand_bible_ingest >> voice_alignment
-    voice_alignment >> create_platform_formatting_flow()
     
-    # TODO: Fix potential issue - create_platform_formatting_flow() is called twice
-    #       This might create duplicate flows or cause unexpected behavior
-    
-    # Connect formatting flow to content generation
+    # Create and connect formatting flow
     formatting_flow = create_platform_formatting_flow()
+    voice_alignment >> formatting_flow
     formatting_flow >> content_craftsman
     content_craftsman >> style_editor
     

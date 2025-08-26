@@ -61,6 +61,22 @@ Error Handling Strategy:
 from pocketflow import Node  # type: ignore
 import logging
 from typing import Any, Dict
+from pydantic import ValidationError
+
+# Import schema validation
+try:
+    from utils.schemas import (
+        validate_shared_state, 
+        create_initial_shared_state,
+        SharedState,
+        PlatformEnum,
+        ContentStatus,
+        ContentPiece
+    )
+    SCHEMA_VALIDATION_AVAILABLE = True
+except ImportError:
+    SCHEMA_VALIDATION_AVAILABLE = False
+    log.warning("Schema validation not available, using unvalidated shared state")
 
 log = logging.getLogger(__name__)
 
@@ -142,22 +158,36 @@ class EngagementManagerNode(Node):
                 "topic_or_goal": "AI automation trends"
             }
         """
-        # TODO(Validation): Validate input shared state structure
-        # TODO(Types): Add type checking for shared dict contents
-        # TODO(Schema): Implement shared state schema validation with Pydantic
-        # TODO(Security): Add input sanitization to prevent injection attacks
-        # TODO(Config): Implement default configuration loading from external config files
-        # TODO(Environment): Add support for environment-specific defaults (dev/staging/prod)
-        # TODO(Dependencies): Validate that required external dependencies are available
-        # TODO(Security): Add input size limits to prevent memory exhaustion
-        # TODO(Reliability): Implement graceful degradation when optional inputs are missing
-        # TODO(Pytest): Add pytest tests for prep() method including edge cases, empty inputs, and state normalization
-        # Ensure task_requirements exists
-        shared.setdefault("task_requirements", {
-            "platforms": [],
-            "intents_by_platform": {},
-            "topic_or_goal": "",
-        })
+        # Validate shared state if schema validation is available
+        if SCHEMA_VALIDATION_AVAILABLE:
+            try:
+                # Attempt to validate the entire shared state
+                validated_state = validate_shared_state(shared)
+                log.debug("Shared state validation successful")
+            except ValidationError as e:
+                log.warning(f"Shared state validation failed: {e}")
+                # Initialize with safe defaults
+                shared.setdefault("task_requirements", {
+                    "platforms": [],
+                    "intents_by_platform": {},
+                    "topic_or_goal": "",
+                })
+            except Exception as e:
+                log.error(f"Unexpected error during validation: {e}")
+                # Fall back to safe defaults
+                shared.setdefault("task_requirements", {
+                    "platforms": [],
+                    "intents_by_platform": {},
+                    "topic_or_goal": "",
+                })
+        else:
+            # Fallback: Ensure task_requirements exists without validation
+            shared.setdefault("task_requirements", {
+                "platforms": [],
+                "intents_by_platform": {},
+                "topic_or_goal": "",
+            })
+        
         return shared["task_requirements"]
 
     # TODO(UX): EngagementManagerNode

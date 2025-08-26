@@ -45,15 +45,23 @@ except Exception:
 
 import logging
 
+# Import schema validation
+try:
+    from utils.schemas import (
+        PlatformEnum, 
+        create_initial_shared_state,
+        SCHEMA_VALIDATION_AVAILABLE as _SCHEMA_AVAILABLE
+    )
+    SCHEMA_VALIDATION_AVAILABLE = _SCHEMA_AVAILABLE
+except ImportError:
+    SCHEMA_VALIDATION_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("Schema validation not available")
+
 # Module logger
 logger = logging.getLogger(__name__)
 if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO)
-
-# TODO: Add proper logging configuration
-# TODO: Import configuration management utilities
-# TODO: Import validation utilities
-# TODO: Import error handling decorators
 
 
 def run_demo() -> None:
@@ -292,39 +300,106 @@ def create_gradio_interface() -> Any:
         TODO: Add input sanitization and security checks
         """
         
-        # TODO: Add validation for platforms_text format
-        # TODO: Support different delimiter options
-        # TODO: Add platform name normalization and validation
-        platforms: List[str] = [p.strip() for p in platforms_text.split(",") if p.strip()]
+        import re
+        import html
+        from utils.schemas import PlatformEnum, create_initial_shared_state
         
-        # TODO: Validate topic content and length
-        # TODO: Add support for rich text input
-        # TODO: Load brand bible from user uploads or database
-        shared: Dict[str, Any] = {
-            "task_requirements": {"platforms": platforms or ["twitter"], "topic_or_goal": topic},
-            "brand_bible": {"xml_raw": ""},
-            "stream": None,
-        }
+        # Input validation and sanitization
+        # Sanitize topic input
+        if not topic or not isinstance(topic, str):
+            raise ValueError("Topic must be a non-empty string")
+        
+        # Remove HTML tags and escape special characters
+        topic = html.escape(re.sub(r'<[^>]+>', '', topic))
+        topic = topic.strip()
+        
+        # Validate topic length
+        if len(topic) < 3:
+            raise ValueError("Topic must be at least 3 characters long")
+        if len(topic) > 500:
+            raise ValueError("Topic must not exceed 500 characters")
+        
+        # Validate and normalize platforms
+        if not platforms_text or not isinstance(platforms_text, str):
+            raise ValueError("Platforms must be specified")
+        
+        # Parse platforms with flexible delimiters
+        platforms_raw = re.split(r'[,;|\s]+', platforms_text.lower())
+        platforms: List[str] = [p.strip() for p in platforms_raw if p.strip()]
+        
+        # Validate platforms against enum
+        valid_platforms = []
+        invalid_platforms = []
+        for platform in platforms:
+            try:
+                # Normalize platform name
+                platform_enum = PlatformEnum(platform)
+                valid_platforms.append(platform_enum.value)
+            except ValueError:
+                invalid_platforms.append(platform)
+        
+        if invalid_platforms:
+            raise ValueError(f"Invalid platforms: {', '.join(invalid_platforms)}. "
+                           f"Valid options are: {', '.join([p.value for p in PlatformEnum])}")
+        
+        if not valid_platforms:
+            raise ValueError("At least one valid platform must be specified")
+        
+        # Create validated shared state
         try:
-            validate_shared_store(shared)
-        except Exception as exc:
-            logger.error("Invalid input from UI: %s", exc)
-            raise
+            if SCHEMA_VALIDATION_AVAILABLE:
+                shared = create_initial_shared_state(
+                    platforms=valid_platforms,
+                    topic=topic,
+                    brand_bible_xml=""
+                )
+            else:
+                # Fallback without schema validation
+                shared: Dict[str, Any] = {
+                    "task_requirements": {
+                        "platforms": valid_platforms,
+                        "topic_or_goal": topic
+                    },
+                    "brand_bible": {"xml_raw": ""},
+                    "stream": None,
+                }
+        except Exception as e:
+            logger.error(f"Failed to create initial state: {e}")
+            raise ValueError(f"Failed to initialize content generation: {str(e)}")
         
-        # TODO: Add error handling with user-friendly messages
-        # TODO: Implement request queuing for high load
-        # TODO: Add request ID tracking and logging
-        flow: 'Flow' = create_main_flow()
+        # Log sanitized inputs
+        logger.info("Running flow with platforms=%s, topic='%s'", valid_platforms, topic[:50])
         
-        # TODO: Add progress tracking and user notifications
-        # TODO: Implement timeout handling
-        # TODO: Add result validation before returning
-        flow.run(shared)
+        # Create and run flow with error handling
+        try:
+            flow: 'Flow' = create_main_flow()
+            flow.run(shared)
+        except Exception as e:
+            logger.error(f"Flow execution failed: {e}", exc_info=True)
+            # Return partial results if available
+            if "content_pieces" in shared and shared["content_pieces"]:
+                logger.warning("Returning partial results after flow error")
+                return shared["content_pieces"]
+            raise RuntimeError(f"Content generation failed: {str(e)}")
         
-        # TODO: Format output for better UI presentation
-        # TODO: Add metadata like generation timestamp, request ID
-        # TODO: Implement result post-processing and validation
-        return shared.get("content_pieces", {})
+        # Validate and format output
+        content_pieces = shared.get("content_pieces", {})
+        if not content_pieces:
+            logger.warning("No content pieces generated")
+            return {"error": "No content was generated. Please try again."}
+        
+        # Add metadata to results
+        import time
+        result = {
+            "content": content_pieces,
+            "metadata": {
+                "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "platforms": valid_platforms,
+                "topic": topic[:100]  # Truncate for display
+            }
+        }
+        
+        return result
 
     # TODO: Add custom CSS styling and branding
     # TODO: Implement responsive design for mobile devices
@@ -364,17 +439,183 @@ def create_gradio_interface() -> Any:
     return demo
 
 
-# TODO: Add proper CLI argument parsing with argparse
-# TODO: Support different execution modes (CLI, Gradio, API)
-# TODO: Add configuration file support
-# TODO: Implement proper exit codes and error handling
-# TODO: Add version information and help commands
 if __name__ == "__main__":
-    # TODO: Add command-line options for Gradio vs CLI mode
-    # TODO: Implement proper error handling and logging setup
-    # TODO: Add configuration validation
-    run_demo()
+    import argparse
+    import sys
     
-    # TODO: Optionally launch Gradio interface based on CLI args
-    # TODO: Add option to run both CLI demo and launch web interface
-    # TODO: Implement proper shutdown handling
+    # Define version
+    __version__ = "1.0.0"
+    
+    # Create argument parser
+    parser = argparse.ArgumentParser(
+        prog="prfirm3",
+        description="Virtual PR Firm - AI-powered content generation system",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Run CLI demo with default settings
+  python main.py --mode cli
+  
+  # Launch Gradio web interface
+  python main.py --mode gradio --port 7860
+  
+  # Generate content for specific platforms
+  python main.py --platforms twitter,linkedin --topic "Product launch"
+  
+  # Use brand bible from file
+  python main.py --brand-bible path/to/brand.xml --platforms email
+        """
+    )
+    
+    # Add arguments
+    parser.add_argument(
+        "--mode", 
+        choices=["cli", "gradio", "both"],
+        default="cli",
+        help="Execution mode: CLI demo, Gradio web interface, or both"
+    )
+    
+    parser.add_argument(
+        "--platforms",
+        type=str,
+        help="Comma-separated list of platforms (twitter,linkedin,instagram,reddit,email,blog)"
+    )
+    
+    parser.add_argument(
+        "--topic",
+        type=str,
+        help="Content topic or goal"
+    )
+    
+    parser.add_argument(
+        "--brand-bible",
+        type=str,
+        help="Path to brand bible XML file"
+    )
+    
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=7860,
+        help="Port for Gradio interface (default: 7860)"
+    )
+    
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Host for Gradio interface (default: 127.0.0.1)"
+    )
+    
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Logging level (default: INFO)"
+    )
+    
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}"
+    )
+    
+    parser.add_argument(
+        "--output",
+        type=str,
+        help="Output file for generated content (JSON format)"
+    )
+    
+    # Parse arguments
+    args = parser.parse_args()
+    
+    # Configure logging based on argument
+    try:
+        from utils.logging_config import initialize_logging, LogFormat
+        from pathlib import Path
+        
+        # Determine log format
+        log_format = LogFormat.DETAILED
+        if args.log_level == "DEBUG":
+            log_format = LogFormat.DETAILED
+        elif getattr(args, "json_logs", False):
+            log_format = LogFormat.JSON
+        
+        # Initialize comprehensive logging
+        initialize_logging(
+            log_dir=Path("./logs"),
+            level=args.log_level,
+            format_type=log_format,
+            enable_performance=args.log_level == "DEBUG"
+        )
+        logger.info("Advanced logging initialized")
+    except ImportError:
+        # Fallback to basic logging
+        logging.basicConfig(
+            level=getattr(logging, args.log_level),
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        logger.warning("Advanced logging not available, using basic configuration")
+    
+    try:
+        if args.mode == "cli" or args.mode == "both":
+            # Run CLI mode
+            if args.platforms and args.topic:
+                # Run with custom parameters
+                from flow import create_main_flow
+                shared = {
+                    "task_requirements": {
+                        "platforms": [p.strip() for p in args.platforms.split(",")],
+                        "topic_or_goal": args.topic
+                    }
+                }
+                
+                # Load brand bible if provided
+                if args.brand_bible:
+                    try:
+                        with open(args.brand_bible, 'r') as f:
+                            shared["brand_bible"] = {"xml_raw": f.read()}
+                    except Exception as e:
+                        logger.error(f"Failed to load brand bible: {e}")
+                        sys.exit(1)
+                
+                # Create and run flow
+                flow = create_main_flow()
+                flow.run(shared)
+                
+                # Output results
+                if args.output:
+                    import json
+                    with open(args.output, 'w') as f:
+                        json.dump(shared.get("content_pieces", {}), f, indent=2)
+                    logger.info(f"Content saved to {args.output}")
+                else:
+                    print("\nGenerated Content:")
+                    for platform, content in shared.get("content_pieces", {}).items():
+                        print(f"\n=== {platform.upper()} ===")
+                        print(content)
+            else:
+                # Run default demo
+                run_demo()
+        
+        if args.mode == "gradio" or args.mode == "both":
+            # Launch Gradio interface
+            try:
+                app = create_gradio_interface()
+                logger.info(f"Launching Gradio interface on {args.host}:{args.port}")
+                app.launch(
+                    server_name=args.host,
+                    server_port=args.port,
+                    share=False,
+                    quiet=False
+                )
+            except Exception as e:
+                logger.error(f"Failed to launch Gradio interface: {e}")
+                sys.exit(1)
+                
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}", exc_info=True)
+        sys.exit(1)
