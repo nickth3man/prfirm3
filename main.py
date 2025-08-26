@@ -137,7 +137,8 @@ def validate_shared_store(shared: Dict[str, Any]) -> None:
     if not isinstance(platforms, list):
         raise TypeError("task_requirements['platforms'] must be a list")
 
-    # (function continues)
+    # Basic validation complete
+    pass
 
 
 def create_gradio_interface() -> Any:
@@ -219,78 +220,7 @@ def create_gradio_interface() -> Any:
         raise RuntimeError("Gradio not installed")
 
     def run_flow(topic: str, platforms_text: str) -> Dict[str, Any]:
-        """Execute the PR content generation flow with user-provided inputs.
-        
-        This nested function serves as the callback handler for the Gradio
-        interface's "Run" button. It processes user inputs, constructs the
-        shared context dictionary, executes the main flow, and returns the
-        generated content for display.
-
-        Input Processing:
-            - Parses comma-separated platform list into individual platform names
-            - Strips whitespace and filters empty entries
-            - Normalizes platform names to lowercase
-            - Validates that at least one platform is specified
-
-        Execution Flow:
-            1. Parse and validate platform inputs
-            2. Construct shared dictionary with user inputs
-            3. Create and configure the main flow
-            4. Execute the flow with the shared context
-            5. Extract and return generated content pieces
-
-        Args:
-            topic (str): The PR topic or goal provided by the user.
-                Should be a descriptive string indicating the purpose
-                of the PR content (e.g., "Announce product launch",
-                "Share company milestone").
-            platforms_text (str): A comma-separated string of target
-                platform names (e.g., "twitter, linkedin, facebook").
-                Platform names are case-insensitive and whitespace is
-                automatically trimmed.
-
-        Returns:
-            dict: A dictionary mapping platform names to their generated
-                content. The structure is:
-                {
-                    "platform_name": "Generated content for this platform...",
-                    "another_platform": "Different content for this platform..."
-                }
-
-        Raises:
-            ValueError: If topic is empty or platforms_text is invalid
-            FlowExecutionError: If the content generation flow fails
-            ValidationError: If inputs don't meet validation criteria
-            TimeoutError: If content generation exceeds time limits
-
-        Example:
-            >>> result = run_flow("Launch new feature", "twitter, linkedin")
-            >>> print(result)
-            {
-                'twitter': 'Exciting news! Our new feature is here...',
-                'linkedin': 'We are pleased to announce the launch...'
-            }
-
-        Input Validation:
-            - Topic must be non-empty and contain at least 3 characters
-            - Platforms must be a valid comma-separated list
-            - At least one platform must be specified
-            - Platform names must be from the supported platform list
-
-        Error Handling:
-            - Invalid inputs return empty dictionary with error message
-            - Flow execution errors are caught and logged
-            - Timeout errors are handled gracefully with partial results
-            - Network errors during content generation are retried
-        
-        TODO: Add comprehensive input validation
-        TODO: Implement async execution for better UX
-        TODO: Add progress callbacks and status updates
-        TODO: Implement proper error handling and user feedback
-        TODO: Add request logging and analytics
-        TODO: Support cancellation of running requests
-        TODO: Add input sanitization and security checks
-        """
+        """Execute the PR content generation flow with user-provided inputs."""
         
         # TODO: Add validation for platforms_text format
         # TODO: Support different delimiter options
