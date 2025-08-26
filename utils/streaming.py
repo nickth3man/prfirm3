@@ -186,7 +186,7 @@ class AgentChatLogger:
             {
                 "reasoning": reasoning,
                 "agent": agent_name,
-                **metadata or {}
+                **(metadata or {})
             }
         )
     
