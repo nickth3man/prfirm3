@@ -5,6 +5,9 @@ import logging
 from typing import List, Dict, Any, Optional, Generator
 from datetime import datetime
 
+# Import circuit breaker for resilience
+from .circuit_breaker import circuit_breaker, CircuitBreakerError
+
 class OpenRouterClient:
     """Client for OpenRouter API with cost tracking and model routing"""
     
@@ -95,8 +98,26 @@ class OpenRouterClient:
             # Default to cost-effective for general use
             return self.model_preferences["cost_effective"]
 
+    @circuit_breaker(
+        name="openrouter_api_calls",
+        failure_threshold=3,
+        reset_timeout=60.0,
+        window_size=10,
+        success_threshold=2
+    )
     def _make_request(self, payload: Dict[str, Any]) -> str:
-        """Make non-streaming request to OpenRouter"""
+        """Make non-streaming request to OpenRouter with circuit breaker protection.
+        
+        Args:
+            payload: Request payload for OpenRouter API
+            
+        Returns:
+            str: Response content from the API
+            
+        Raises:
+            CircuitBreakerError: If circuit breaker is open due to previous failures
+            requests.exceptions.RequestException: HTTP request errors
+        """
         try:
             response = self.session.post(
                 f"{self.base_url}/chat/completions",
@@ -116,8 +137,26 @@ class OpenRouterClient:
             self.logger.error(f"OpenRouter API error: {e}")
             raise
 
+    @circuit_breaker(
+        name="openrouter_streaming_calls",
+        failure_threshold=3,
+        reset_timeout=60.0,
+        window_size=10,
+        success_threshold=2
+    )
     def _stream_response(self, payload: Dict[str, Any]) -> Generator[str, None, None]:
-        """Stream response from OpenRouter"""
+        """Stream response from OpenRouter with circuit breaker protection.
+        
+        Args:
+            payload: Request payload for OpenRouter API
+            
+        Yields:
+            str: Streamed content chunks
+            
+        Raises:
+            CircuitBreakerError: If circuit breaker is open due to previous failures
+            requests.exceptions.RequestException: HTTP request errors
+        """
         payload["stream"] = True
         
         try:

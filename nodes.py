@@ -62,6 +62,9 @@ from pocketflow import Node  # type: ignore
 import logging
 from typing import Any, Dict
 
+# Import circuit breaker for external dependency protection
+from utils.circuit_breaker import circuit_breaker, CircuitBreakerError
+
 log = logging.getLogger(__name__)
 
 # Module-level WHY: Nodes implement the PocketFlow `Node` contract: prep->exec->post.
@@ -1161,6 +1164,127 @@ class ContentCraftsmanNode(Node):
             "topic": shared.get("task_requirements", {}).get("topic_or_goal", "")
         }
 
+    @circuit_breaker(
+        name="content_generation_llm",
+        failure_threshold=3,
+        reset_timeout=60.0,
+        window_size=10,
+        success_threshold=2
+    )
+    def _generate_content_with_llm(self, platform: str, topic: str, guidelines: Dict[str, Any]) -> str:
+        """Generate content using LLM with circuit breaker protection.
+        
+        Args:
+            platform: Target platform (twitter, linkedin, etc.)
+            topic: Content topic or goal
+            guidelines: Platform-specific formatting guidelines
+            
+        Returns:
+            str: Generated content for the platform
+            
+        Raises:
+            CircuitBreakerError: If LLM circuit breaker is open
+            Exception: Any LLM API errors
+        """
+        try:
+            from utils.call_llm import call_llm
+            
+            # Build platform-specific prompt
+            prompt = self._build_content_prompt(platform, topic, guidelines)
+            
+            # Call LLM with appropriate parameters
+            content = call_llm(
+                prompt=prompt,
+                temperature=0.7,
+                max_tokens=500,
+                use_cache=True
+            )
+            
+            log.debug(f"Generated content for {platform} using LLM: {len(content)} chars")
+            return content
+            
+        except Exception as e:
+            log.warning(f"LLM content generation failed for {platform}: {e}")
+            raise
+
+    def _build_content_prompt(self, platform: str, topic: str, guidelines: Dict[str, Any]) -> str:
+        """Build platform-specific content generation prompt.
+        
+        Args:
+            platform: Target platform
+            topic: Content topic
+            guidelines: Platform guidelines
+            
+        Returns:
+            str: Formatted prompt for LLM
+        """
+        # Extract platform constraints
+        char_limit = guidelines.get("character_limit", "")
+        tone = guidelines.get("tone", "professional")
+        format_rules = guidelines.get("format", {})
+        
+        prompt = f"""Create engaging {platform} content about: {topic}
+
+Platform Requirements:
+- Platform: {platform}
+- Tone: {tone}
+{f"- Character limit: {char_limit}" if char_limit else ""}
+
+Format Guidelines:
+{self._format_guidelines_for_prompt(format_rules)}
+
+Generate content that:
+1. Captures attention immediately
+2. Provides clear value to the audience  
+3. Includes a compelling call-to-action
+4. Follows platform best practices
+5. Maintains brand voice consistency
+
+Content:"""
+        
+        return prompt
+
+    def _format_guidelines_for_prompt(self, format_rules: Dict[str, Any]) -> str:
+        """Format platform guidelines for inclusion in LLM prompt."""
+        if not format_rules:
+            return "- Follow standard platform conventions"
+        
+        formatted = []
+        for key, value in format_rules.items():
+            if isinstance(value, bool) and value:
+                formatted.append(f"- Use {key}")
+            elif isinstance(value, str):
+                formatted.append(f"- {key}: {value}")
+            elif isinstance(value, (int, float)):
+                formatted.append(f"- {key}: {value}")
+        
+        return "\n".join(formatted) if formatted else "- Follow standard platform conventions"
+
+    def _generate_fallback_content(self, platform: str, topic: str) -> str:
+        """Generate fallback content when LLM is unavailable.
+        
+        Args:
+            platform: Target platform
+            topic: Content topic
+            
+        Returns:
+            str: Template-based content
+        """
+        # Platform-specific templates
+        templates = {
+            "twitter": "🚀 {topic}\n\nDiscover how this can transform your approach to success.\n\nWhat's your experience? Share below! 👇\n\n#Innovation #Growth",
+            "linkedin": "💡 Insights on {topic}\n\nIn today's rapidly evolving landscape, understanding {topic} is crucial for professional growth.\n\nKey benefits:\n• Enhanced efficiency\n• Improved outcomes\n• Strategic advantage\n\nWhat's your perspective on this? Let's discuss in the comments.\n\n#Professional #Leadership #Growth",
+            "instagram": "✨ {topic} ✨\n\nTransforming the way we think about success 💫\n\nSwipe for insights →\n\n#Inspiration #Growth #Success #Mindset",
+            "reddit": "# Discussion: {topic}\n\nI've been researching {topic} and wanted to share some insights with the community.\n\n**Key points:**\n- Innovation drives change\n- Understanding creates opportunity\n- Action leads to results\n\nWhat are your thoughts? Has anyone had experience with this?\n\nLooking forward to the discussion!",
+            "blog": "# {topic}: A Comprehensive Guide\n\n## Introduction\n\nIn today's dynamic environment, {topic} represents a significant opportunity for growth and innovation.\n\n## Key Insights\n\nOur analysis reveals several important considerations that can help you navigate this space effectively.\n\n## Conclusion\n\nBy understanding these principles, you can position yourself for success in this evolving landscape.\n\n*What are your thoughts on {topic}? Share your experience in the comments below.*"
+        }
+        
+        template = templates.get(platform, "Content about {topic}: Key insights and actionable strategies for success.")
+        content = template.format(topic=topic or "professional development")
+        
+        log.info(f"Generated fallback content for {platform}: {len(content)} chars")
+        return content
+
     def exec(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Generates platform-optimized content drafts with intelligent fallback.
 
@@ -1239,20 +1363,26 @@ class ContentCraftsmanNode(Node):
         guidelines = inputs["platform_guidelines"]
         topic = inputs["topic"]
         drafts = {}
+        
         for platform in guidelines.keys():
-            # TODO(Generation): This is placeholder text - implement actual content generation
-            # TODO(Structure): Implement section-based content generation (hook, body, CTA)
-            # TODO(Optimization): Add platform-specific content optimization
-            # TODO(Validation): Implement character count validation per platform
-            # TODO(Hashtags): Add hashtag generation and placement
-            # TODO(Links): Implement link shortening and tracking
-            # TODO(Emoji): Add emoji selection and placement
-            # TODO(Scheduling): Implement content scheduling optimization
-            # TODO(Targeting): Add audience targeting considerations
-            # TODO(Engagement): Implement engagement optimization strategies
-            # TODO(Pytest): Add pytest tests for platform-specific generation and optimization
-            # TODO: Implement section-budgeted content generation with LLM integration to make fallback redundant
-            drafts[platform] = f"Draft for {platform}: {topic or '[no topic provided]'}"
+            try:
+                # Try LLM-based content generation with circuit breaker protection
+                content = self._generate_content_with_llm(platform, topic, guidelines.get(platform, {}))
+                drafts[platform] = content
+                log.debug(f"Successfully generated content for {platform} using LLM")
+                
+            except CircuitBreakerError as e:
+                # Circuit breaker is open - use fallback immediately
+                log.warning(f"LLM circuit breaker open for {platform}: {e}")
+                content = self._generate_fallback_content(platform, topic)
+                drafts[platform] = content
+                
+            except Exception as e:
+                # Other LLM errors - also use fallback
+                log.warning(f"LLM generation failed for {platform}: {e}")
+                content = self._generate_fallback_content(platform, topic)
+                drafts[platform] = content
+        
         return drafts
 
     def post(self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, str]) -> str:
@@ -1465,6 +1595,147 @@ class StyleEditorNode(Node):
             "persona": shared.get("brand_bible", {}).get("persona_voice", {})
         }
 
+    @circuit_breaker(
+        name="style_editing_llm",
+        failure_threshold=3,
+        reset_timeout=60.0,
+        window_size=10,
+        success_threshold=2
+    )
+    def _rewrite_content_with_llm(self, content: str, platform: str, persona: Dict[str, Any]) -> str:
+        """Rewrite content using LLM with circuit breaker protection.
+        
+        Args:
+            content: Original content to rewrite
+            platform: Target platform
+            persona: Brand voice persona constraints
+            
+        Returns:
+            str: Rewritten content that follows brand voice
+            
+        Raises:
+            CircuitBreakerError: If LLM circuit breaker is open
+            Exception: Any LLM API errors
+        """
+        try:
+            from utils.call_llm import call_llm
+            
+            # Build rewriting prompt
+            prompt = self._build_rewriting_prompt(content, platform, persona)
+            
+            # Call LLM for rewriting
+            rewritten = call_llm(
+                prompt=prompt,
+                temperature=0.3,  # Lower temperature for more consistent rewriting
+                max_tokens=len(content) * 2,  # Allow for expansion
+                use_cache=True
+            )
+            
+            log.debug(f"Rewrote content for {platform} using LLM: {len(content)} -> {len(rewritten)} chars")
+            return rewritten.strip()
+            
+        except Exception as e:
+            log.warning(f"LLM rewriting failed for {platform}: {e}")
+            raise
+
+    def _build_rewriting_prompt(self, content: str, platform: str, persona: Dict[str, Any]) -> str:
+        """Build prompt for LLM-based content rewriting.
+        
+        Args:
+            content: Original content
+            platform: Target platform
+            persona: Brand voice constraints
+            
+        Returns:
+            str: Formatted rewriting prompt
+        """
+        # Extract persona constraints
+        voice_tone = persona.get("voice_tone", "professional")
+        forbidden_terms = persona.get("forbidden_terms", [])
+        required_phrases = persona.get("required_phrases", [])
+        
+        prompt = f"""Rewrite the following {platform} content to improve its authenticity and brand voice alignment.
+
+Original Content:
+{content}
+
+Brand Voice Requirements:
+- Tone: {voice_tone}
+- Platform: {platform}
+{f"- Avoid these terms: {', '.join(forbidden_terms)}" if forbidden_terms else ""}
+{f"- Include these phrases naturally: {', '.join(required_phrases)}" if required_phrases else ""}
+
+Rewriting Guidelines:
+1. Remove AI-generated patterns and clichés
+2. Use natural, human-like language
+3. Maintain the original message and intent
+4. Ensure brand voice consistency
+5. Keep platform-appropriate formatting
+6. Preserve any hashtags and mentions
+7. Maintain or improve engagement potential
+
+Rewritten Content:"""
+        
+        return prompt
+
+    def _apply_fallback_rewriting(self, content: str, persona: Dict[str, Any]) -> str:
+        """Apply basic rewriting when LLM is unavailable.
+        
+        Args:
+            content: Original content
+            persona: Brand voice constraints
+            
+        Returns:
+            str: Content with basic rewriting applied
+        """
+        result = content
+        
+        # Remove common AI patterns
+        ai_patterns = [
+            ("In today's digital landscape,", ""),
+            ("In today's world,", ""),
+            ("game-changer", "transformative"),
+            ("game-changing", "transformative"), 
+            ("cutting-edge", "advanced"),
+            ("revolutionary", "innovative"),
+            ("groundbreaking", "significant"),
+            ("paradigm shift", "major change"),
+            ("unlock", "discover"),
+            ("leverage", "use"),
+            ("utilize", "use"),
+            ("seamless", "smooth"),
+            ("robust", "strong"),
+            ("comprehensive", "complete"),
+            ("It's worth noting that", ""),
+            ("It's important to note", ""),
+            ("Furthermore,", "Also,"),
+            ("Additionally,", "Also,"),
+        ]
+        
+        for old_phrase, new_phrase in ai_patterns:
+            result = result.replace(old_phrase, new_phrase)
+        
+        # Apply forbidden term replacements
+        forbidden_terms = persona.get("forbidden_terms", [])
+        for term in forbidden_terms:
+            if term in result:
+                # Simple replacement with more natural alternatives
+                alternatives = {
+                    "synergy": "collaboration",
+                    "solutions": "services",
+                    "optimize": "improve",
+                    "maximize": "increase",
+                    "ecosystem": "environment"
+                }
+                replacement = alternatives.get(term.lower(), "approach")
+                result = result.replace(term, replacement)
+        
+        # Clean up multiple spaces and line breaks
+        result = " ".join(result.split())
+        
+        log.info(f"Applied fallback rewriting: {len(content)} -> {len(result)} chars")
+        return result
+
     def exec(self, inputs: Dict[str, Any]) -> Dict[str, str]:
         """Performs intelligent content rewriting with brand voice constraint enforcement.
 
@@ -1524,62 +1795,35 @@ class StyleEditorNode(Node):
 
         content = inputs["content_pieces"]
         persona = inputs.get("persona", {})
-        try:
-            from utils.rewrite_with_constraints import rewrite_with_constraints
-            # TODO(Error): Add proper error handling for individual platform rewrites
-            # TODO(Metrics): Track rewrite metrics (changes made, forbidden terms found, etc.)
-            # TODO(Quality): Implement rewrite quality scoring and validation
-            # TODO(Config): Add support for rewrite configuration and customization
-            # TODO(Performance): Implement rewrite performance optimization
-            # TODO(Templates): Add support for rewrite templates and rules
-            # TODO(Compliance): Implement rewrite compliance checking
-            # TODO(Testing): Add support for rewrite A/B testing
-            # TODO(Analytics): Implement rewrite analytics and reporting
-            # TODO(Versioning): Add support for rewrite version control
-            # TODO(Pytest): Add pytest tests for rewrite_with_constraints utility integration
-            rewritten = {}
-            for p, payload in content.items():
-                # TODO(Platform): Add platform-specific rewrite rules and constraints
-                # TODO(Quality): Implement rewrite quality validation per platform
-                # TODO(Optimization): Add support for incremental rewriting and optimization
-                rewritten[p] = rewrite_with_constraints(payload.get("text", ""), persona, {})
-            return rewritten
-        except Exception:
-            # TODO(Deterministic): Implement pre-apply deterministic regex fixes
-            # TODO(Validation): Add validation for absence of forbidden_terms after rewrite
-            # TODO(Validation): Ensure required phrases remain present after rewrite
-            # TODO(Review): Flag content for manual review instead of silent removal
-            # TODO(Debugging): Log specific rewrite failures and fallback actions
-            # TODO(Strategy): Implement comprehensive fallback rewriting strategies
-            # TODO(Partial): Add support for partial rewriting when full rewrite fails
-            # TODO(Recovery): Implement rewrite failure recovery and retry mechanisms
-            # TODO(Manual): Add support for manual intervention workflows
-            # TODO(Warning): Implement rewrite quality degradation warnings
-            # TODO(Pytest): Add pytest tests for fallback rewriting and error handling
-            # Fallback: naive replace of forbidden terms
-            # TODO: Implement deterministic regex fixes and validation of forbidden terms/phrases to make fallback redundant
-            rewritten = {}
-            forb = persona.get("forbidden_terms", []) if isinstance(persona, dict) else []
-            for p, payload in content.items():
-                txt = payload.get("text", "")
-                # TODO(Matching): Add case-insensitive matching and word boundary detection
-                # TODO(Audit): Track which terms were replaced for auditing
-                # TODO(Context): Implement context-aware term replacement
-                # TODO(Suggestions): Add support for term replacement suggestions
-                # TODO(Validation): Implement term replacement validation
-                # TODO(Rules): Add support for custom replacement rules
-                # TODO(Performance): Implement term replacement performance optimization
-                # TODO(Pytest): Add pytest tests for term replacement and tracking
-                for term in forb:
-                    # TODO(Strategy): Implement smarter replacement strategies (synonyms, context-aware)
-                    # TODO(Tracking): Add support for term replacement logging and tracking
-                    txt = txt.replace(term, "")
-                # TODO(Config): Make this configurable rather than hard-coded
-                # TODO(Rules): Add support for configurable character replacement rules
-                # Remove em-dash as hard rule
-                txt = txt.replace("—", "-")
-                rewritten[p] = txt
-            return rewritten
+        
+        rewritten = {}
+        
+        for platform, payload in content.items():
+            original_text = payload.get("text", "")
+            
+            if not original_text:
+                rewritten[platform] = ""
+                continue
+            
+            try:
+                # Try LLM-based rewriting with circuit breaker protection
+                rewritten_text = self._rewrite_content_with_llm(original_text, platform, persona)
+                rewritten[platform] = rewritten_text
+                log.debug(f"Successfully rewrote content for {platform} using LLM")
+                
+            except CircuitBreakerError as e:
+                # Circuit breaker is open - use fallback immediately
+                log.warning(f"Style editing circuit breaker open for {platform}: {e}")
+                rewritten_text = self._apply_fallback_rewriting(original_text, persona)
+                rewritten[platform] = rewritten_text
+                
+            except Exception as e:
+                # Other LLM errors - also use fallback
+                log.warning(f"LLM rewriting failed for {platform}: {e}")
+                rewritten_text = self._apply_fallback_rewriting(original_text, persona)
+                rewritten[platform] = rewritten_text
+        
+        return rewritten
 
     def post(self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, str]) -> str:
         """Persists rewritten content and updates shared state with refinement results.

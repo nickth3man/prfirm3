@@ -1,14 +1,18 @@
 # utils/call_llm.py
-"""LLM calling utility with fallback support.
+"""LLM calling utility with fallback support and circuit breaker protection.
 
 This module provides a unified interface for calling various LLM providers
-with automatic fallback mechanisms when API keys are unavailable.
+with automatic fallback mechanisms when API keys are unavailable and circuit
+breaker protection against cascading failures.
 """
 
 import os
 import logging
 from typing import List, Dict, Any, Optional
 from functools import lru_cache
+
+# Import circuit breaker for resilience
+from .circuit_breaker import circuit_breaker, CircuitBreakerError
 
 log = logging.getLogger(__name__)
 
@@ -77,6 +81,8 @@ def call_llm(
     if OPENAI_AVAILABLE and os.getenv("OPENAI_API_KEY"):
         try:
             return _call_openai(messages, model or "gpt-3.5-turbo", temperature, max_tokens, **kwargs)
+        except CircuitBreakerError as e:
+            log.warning(f"OpenAI circuit breaker is open: {e}")
         except Exception as e:
             log.debug(f"OpenAI call failed: {e}")
     
@@ -84,14 +90,23 @@ def call_llm(
     if ANTHROPIC_AVAILABLE and os.getenv("ANTHROPIC_API_KEY"):
         try:
             return _call_anthropic(messages, model or "claude-3-haiku", temperature, max_tokens, **kwargs)
+        except CircuitBreakerError as e:
+            log.warning(f"Anthropic circuit breaker is open: {e}")
         except Exception as e:
             log.debug(f"Anthropic call failed: {e}")
     
     # 4. Fallback to mock response for testing/development
-    log.warning("No LLM provider available, using fallback mock response")
+    log.warning("No LLM provider available or all circuits open, using fallback mock response")
     return _generate_fallback_response(messages, temperature)
 
 
+@circuit_breaker(
+    name="openai_api_calls",
+    failure_threshold=3,
+    reset_timeout=60.0,
+    window_size=10,
+    success_threshold=2
+)
 def _call_openai(
     messages: List[Dict[str, str]],
     model: str,
@@ -99,7 +114,7 @@ def _call_openai(
     max_tokens: int,
     **kwargs
 ) -> str:
-    """Call OpenAI API.
+    """Call OpenAI API with circuit breaker protection.
     
     Args:
         messages: List of message dictionaries
@@ -110,6 +125,10 @@ def _call_openai(
     
     Returns:
         str: The response text
+        
+    Raises:
+        CircuitBreakerError: If circuit breaker is open due to previous failures
+        Exception: Any API-related errors from OpenAI
     """
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     
@@ -124,6 +143,13 @@ def _call_openai(
     return response.choices[0].message.content
 
 
+@circuit_breaker(
+    name="anthropic_api_calls",
+    failure_threshold=3,
+    reset_timeout=60.0,
+    window_size=10,
+    success_threshold=2
+)
 def _call_anthropic(
     messages: List[Dict[str, str]],
     model: str,
@@ -131,7 +157,7 @@ def _call_anthropic(
     max_tokens: int,
     **kwargs
 ) -> str:
-    """Call Anthropic API.
+    """Call Anthropic API with circuit breaker protection.
     
     Args:
         messages: List of message dictionaries
@@ -142,6 +168,10 @@ def _call_anthropic(
     
     Returns:
         str: The response text
+        
+    Raises:
+        CircuitBreakerError: If circuit breaker is open due to previous failures
+        Exception: Any API-related errors from Anthropic
     """
     client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     
