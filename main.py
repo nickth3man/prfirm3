@@ -64,32 +64,13 @@ logger = get_logger(__name__)
 
 
 def run_demo() -> None:
-    """Run a minimal demo of the main flow using a sample shared store.
-
-    WHY (intent / invariants): Provide a simple CLI entry point for developers
-    to validate the wiring and fallback behaviour of the flow without
-    requiring Gradio or external keys.
-
-    Pre-condition:
-        - The environment must have `pocketflow` installed or available on PYTHONPATH.
-    Post-condition:
-        - `shared["content_pieces"]` will contain generated drafts or remain
-          absent if validation failed. Any errors are logged.
-
+    """
+    Run a minimal demo of the main flow using configuration defaults and print generated content pieces.
+    
+    Builds a small shared store from the module configuration (default topic and platforms), validates it, creates the main flow, runs the flow, and prints the resulting `content_pieces`. The function sets a per-run request ID for correlated logging and will log progress and errors; it may re-raise exceptions encountered during validation or flow execution.
+    
     Raises:
-        - ValueError: invalid shared store structure (validated by `validate_shared_store`).
-
-    Example:
-        >>> run_demo()
-        Content pieces: {'twitter': 'Draft for twitter: Announce product', ...}
-
-    Performance expectation: Fast for small platform lists (< 5); in production
-    heavy LLM calls may dominate runtime.
-
-    Test stub (pytest):
-        def test_run_demo_smoke(tmp_path):
-            # smoke test that run_demo doesn't raise
-            run_demo()
+        ValidationError: if the shared store fails validation (re-raised from validate_shared_store).
     """
     # Set request ID for correlation
     request_id = set_request_id()
@@ -142,20 +123,17 @@ def run_demo() -> None:
 
 
 def validate_shared_store(shared: Dict[str, Any]) -> None:
-    """Validate minimal `shared` dict required by the flows.
-
-    This function performs lightweight checks only. More detailed schema
-    validation should be done using Pydantic in higher-assurance contexts.
-
-    Pre-condition: `shared` is provided by caller.
-    Post-condition: raises when structure is invalid; otherwise returns None.
-
-    Test stub:
-        def test_validate_shared_store_invalid():
-            with pytest.raises(ValueError):
-                validate_shared_store({})
-
-    Lint: precise pragmas only where necessary.
+    """
+    Validate the minimal `shared` dictionary structure required by flows.
+    
+    Ensures `shared` is a dict containing a `task_requirements` dict which in turn
+    must include a `platforms` key mapped to a list. Raises on structural or type
+    mismatches; returns None on success.
+    
+    Raises:
+        TypeError: if `shared` is not a dict or `platforms` is not a list.
+        ValueError: if `task_requirements` is missing or not a dict, or if
+                    `platforms` key is absent.
     """
     if not isinstance(shared, dict):
         raise TypeError("shared must be a dict")
@@ -172,76 +150,19 @@ def validate_shared_store(shared: Dict[str, Any]) -> None:
 
 
 def create_gradio_interface() -> Any:
-    """Create and return a Gradio Blocks app for the Virtual PR Firm demo.
-
-    This function constructs a complete web-based user interface using Gradio
-    that allows users to interactively generate PR content. The interface
-    provides input fields for topic/goal and target platforms, and displays
-    the generated content in a structured JSON format.
-
-    Interface Components:
-        - Topic/Goal Input: Text field for specifying the PR objective
-        - Platforms Input: Comma-separated list of target social media platforms
-        - Run Button: Triggers the content generation flow
-        - Output Display: JSON viewer showing generated content for each platform
-
-    Supported Platforms:
-        The interface accepts any comma-separated list of platform names.
-        Common supported platforms include:
-        - twitter
-        - linkedin
-        - facebook
-        - instagram
-
-    User Interaction Flow:
-        1. User enters a topic or goal (e.g., "Announce product launch")
-        2. User specifies target platforms (e.g., "twitter, linkedin")
-        3. User clicks "Run" button to generate content
-        4. Generated content appears in the output JSON viewer
-
-    Default Values:
-        - Topic: "Announce product"
-        - Platforms: "twitter, linkedin"
-
-    Returns:
-        gr.Blocks: A configured Gradio Blocks application ready for launch
-
-    Raises:
-        RuntimeError: If Gradio is not installed or available
-        ImportError: If required dependencies are missing
-        ConfigurationError: If the interface cannot be properly configured
-
-    Example:
-        >>> app = create_gradio_interface()
-        >>> app.launch()  # Launches web interface on default port
-        >>> app.launch(server_port=7860, share=True)  # Custom configuration
-
-    Security Considerations:
-        - Input validation is performed on all user inputs
-        - Platform names are sanitized and normalized
-        - Topic content is validated for appropriate length and content
-        - No file uploads are currently supported to minimize attack surface
-
-    Performance Notes:
-        - Content generation runs synchronously and may take several seconds
-        - Large requests may timeout without proper configuration
-        - No caching is implemented, so identical requests regenerate content
-
-    Accessibility:
-        - Interface uses semantic HTML for screen reader compatibility
-        - Keyboard navigation is supported for all interactive elements
-        - Color contrast meets WCAG guidelines
+    """
+    Create and return a Gradio Blocks application for the Virtual PR Firm demo.
     
-    TODO: Add comprehensive input validation and sanitization
-    TODO: Implement user authentication and session management
-    TODO: Add rate limiting and request throttling
-    TODO: Support file uploads for brand bible content
-    TODO: Add progress bars and real-time status updates
-    TODO: Implement result caching and history management
-    TODO: Add export functionality for generated content
-    TODO: Support custom styling and theming
-    TODO: Add help documentation and tooltips
-    TODO: Implement error recovery and graceful degradation
+    The returned interface provides a Topic/Goal textbox, a Platforms (comma-separated) textbox,
+    a Run button that executes the content-generation flow, and a JSON viewer that displays
+    generated content pieces keyed by platform. Inputs are validated and the flow is executed
+    synchronously when the Run button is pressed; errors are returned as structured JSON to the UI.
+    
+    Returns:
+        gr.Blocks: A configured Gradio Blocks app ready to be launched.
+    
+    Raises:
+        RuntimeError: If Gradio is not installed or available at runtime.
     """
 
     # TODO: Provide more helpful error message with installation instructions
@@ -250,23 +171,17 @@ def create_gradio_interface() -> Any:
         raise RuntimeError("Gradio not installed")
 
     def run_flow(topic: str, platforms_text: str) -> Dict[str, Any]:
-        """Execute the PR content generation flow with user-provided inputs.
+        """
+        Execute the PR content-generation flow for given user inputs and return generated content.
         
-        This nested function serves as the callback handler for the Gradio
-        interface's "Run" button. It processes user inputs, constructs the
-        shared context dictionary, executes the main flow, and returns the
-        generated content for display.
-
-        Args:
+        Validates and sanitizes the provided topic and comma-separated platforms, enforces rate limits, runs the main flow, and returns the produced content pieces for each platform. On failure returns a dictionary with an "error" key and a user-facing message.
+        
+        Parameters:
             topic (str): The PR topic or goal provided by the user.
-            platforms_text (str): A comma-separated string of target platform names.
-
+            platforms_text (str): Comma-separated target platform names (e.g., "twitter, linkedin").
+        
         Returns:
-            dict: A dictionary mapping platform names to their generated content.
-
-        Raises:
-            ValidationError: If inputs don't meet validation criteria
-            Exception: If flow execution fails
+            dict: Mapping of platform names to generated content pieces on success, or {"error": "<message>"} on failure.
         """
         # Set request ID for correlation
         request_id = set_request_id()
@@ -367,7 +282,31 @@ def create_gradio_interface() -> Any:
 
 
 def main():
-    """Main CLI entry point with comprehensive argument parsing."""
+    """
+    Main command-line entry point for the application.
+    
+    Parses CLI arguments, applies configuration overrides, initializes logging, and dispatches to one of two modes:
+    - --demo: run the CLI demo flow (calls run_demo()).
+    - --serve: build and launch the Gradio web interface (calls create_gradio_interface()).
+    
+    Also supports informational actions that run and exit immediately:
+    - --version: print version information.
+    - --info: print basic system and Python information.
+    - --health: perform basic availability checks for optional runtime dependencies (Gradio, PocketFlow).
+    
+    Behavior and side effects:
+    - Loads configuration via get_config(path) or defaults when --config is omitted.
+    - Applies CLI overrides for host, port, log level, and log file to the loaded config.
+    - Reconfigures logging via setup_logging(...) using the resolved configuration.
+    - May start a Gradio server (blocking) when run with --serve.
+    - Emits informational and error messages to stdout/stderr and logs contextual errors via log_error_with_context.
+    
+    Return value:
+    - Returns integer exit codes suitable for process exit:
+      - 0: success or informational action completed.
+      - 1: unhandled error occurred.
+      - 130: interrupted by user (KeyboardInterrupt).
+    """
     parser = argparse.ArgumentParser(
         description="Virtual PR Firm - AI-powered content generation for social media platforms",
         formatter_class=argparse.RawDescriptionHelpFormatter,

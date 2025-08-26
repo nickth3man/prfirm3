@@ -33,6 +33,16 @@ class ValidationError(Exception):
     """Custom exception for validation errors."""
     
     def __init__(self, message: str, field: str = None, code: str = None):
+        """
+        Initialize a ValidationError.
+        
+        Parameters:
+            message (str): Human-readable error message describing the validation failure.
+            field (str, optional): Name of the field related to the error, if applicable.
+            code (str, optional): Machine-friendly error code for programmatic handling.
+        
+        The instance will expose .message, .field, and .code attributes and behaves like a standard Exception.
+        """
         self.message = message
         self.field = field
         self.code = code
@@ -89,17 +99,19 @@ _rate_limit_store = defaultdict(list)
 
 
 def sanitize_string(text: str, max_length: int = 1000) -> str:
-    """Sanitize and normalize a string input.
+    """
+    Return a sanitized, normalized string suitable for further validation.
     
-    Args:
-        text: Input string to sanitize
-        max_length: Maximum allowed length
-        
+    Removes null bytes and non-printable control characters, collapses and trims whitespace, and enforces length constraints.
+    
+    Parameters:
+        max_length (int): Maximum allowed character length for the returned string (default 1000).
+    
     Returns:
-        str: Sanitized string
-        
+        str: The sanitized string.
+    
     Raises:
-        ValidationError: If input is invalid
+        ValidationError: If input is not a string, is empty after sanitization, or exceeds max_length.
     """
     if not isinstance(text, str):
         raise ValidationError("Input must be a string", "input", "TYPE_ERROR")
@@ -124,18 +136,24 @@ def sanitize_string(text: str, max_length: int = 1000) -> str:
 
 
 def validate_topic(topic: str, min_length: int = 3, max_length: int = 500) -> str:
-    """Validate and sanitize topic input.
+    """
+    Validate and sanitize a topic string for safe use.
     
-    Args:
-        topic: Topic string to validate
-        min_length: Minimum required length
-        max_length: Maximum allowed length
-        
+    Performs string sanitization (whitespace/control-char normalization and length trimming), enforces minimum and maximum length, rejects common injection and embedded-content patterns (script, iframe, javascript:, data URLs, event handlers, etc.), and rejects topics with excessive repeated words.
+    
+    Parameters:
+        topic (str): Input topic to validate.
+        min_length (int): Minimum allowed character length (default 3).
+        max_length (int): Maximum allowed character length; also passed to the underlying sanitizer (default 500).
+    
     Returns:
-        str: Validated and sanitized topic
-        
+        str: The sanitized, validated topic.
+    
     Raises:
-        ValidationError: If topic is invalid
+        ValidationError: If the input is not a valid topic. Error codes used include:
+            - "LENGTH_ERROR" when shorter than min_length,
+            - "SECURITY_ERROR" when suspicious/malicious patterns are detected,
+            - "CONTENT_ERROR" when excessive word repetition is found.
     """
     # Basic sanitization
     topic = sanitize_string(topic, max_length)
@@ -182,13 +200,16 @@ def validate_topic(topic: str, min_length: int = 3, max_length: int = 500) -> st
 
 
 def normalize_platform_name(platform: str) -> str:
-    """Normalize platform name to standard format.
+    """
+    Normalize a platform identifier to the canonical platform name.
     
-    Args:
-        platform: Platform name to normalize
-        
-    Returns:
-        str: Normalized platform name
+    Converts the input to lowercase, trims surrounding whitespace, and maps common short forms
+    (e.g., "x" -> "twitter", "fb" -> "facebook", "ig" -> "instagram", "yt" -> "youtube",
+    "tt" -> "tiktok", "li" -> "linkedin"). If the input is already a known canonical name it
+    is returned in lowercase trimmed form; otherwise the normalized input is returned as-is.
+    
+    Raises:
+        ValidationError: if `platform` is not a string.
     """
     if not isinstance(platform, str):
         raise ValidationError("Platform must be a string", "platform", "TYPE_ERROR")
@@ -210,17 +231,23 @@ def normalize_platform_name(platform: str) -> str:
 
 
 def validate_platforms(platforms_text: str, max_platforms: int = 10) -> List[str]:
-    """Validate and normalize platform list.
+    """
+    Validate and normalize a comma-separated list of platform names.
     
-    Args:
-        platforms_text: Comma-separated platform names
-        max_platforms: Maximum number of platforms allowed
-        
+    Takes a comma-separated string, normalizes each entry via normalize_platform_name, enforces a maximum count,
+    ensures each platform is supported (per SUPPORTED_PLATFORMS), and rejects duplicates. Returns a list of
+    canonical platform names suitable for downstream use.
+    
+    Parameters:
+        platforms_text (str): Comma-separated platform names (e.g., "twitter, facebook, linkedin").
+        max_platforms (int): Maximum allowed platforms; exceeding this raises a validation error.
+    
     Returns:
-        List[str]: List of validated platform names
-        
+        List[str]: Canonical, validated platform names.
+    
     Raises:
-        ValidationError: If platforms are invalid
+        ValidationError: If input is not a string, no platforms are provided, the count exceeds max_platforms,
+                         any platform is unsupported, or a duplicate platform is present.
     """
     if not isinstance(platforms_text, str):
         raise ValidationError("Platforms must be a string", "platforms", "TYPE_ERROR")
@@ -260,17 +287,22 @@ def validate_platforms(platforms_text: str, max_platforms: int = 10) -> List[str
 
 
 def validate_brand_bible_content(content: str, max_size: int = 10 * 1024 * 1024) -> str:
-    """Validate brand bible content.
+    """
+    Validate and sanitize brand bible content.
     
-    Args:
-        content: Brand bible content to validate
-        max_size: Maximum content size in bytes
-        
+    Performs type and size checks, runs general string sanitization, and rejects content containing common
+    embedded/malicious constructs (scripts, iframes, javascript/data/vbscript URIs, inline event handlers, forms/inputs/objects/embeds).
+    Returns the sanitized content when valid.
+    
+    Parameters:
+        content (str): Raw brand bible text to validate.
+        max_size (int): Maximum allowed size in bytes (default 10 MiB).
+    
     Returns:
-        str: Validated content
-        
+        str: Sanitized brand bible content.
+    
     Raises:
-        ValidationError: If content is invalid
+        ValidationError: If the input is not a string, exceeds max_size, or contains potentially malicious elements.
     """
     if not isinstance(content, str):
         raise ValidationError("Brand bible content must be a string", "brand_bible", "TYPE_ERROR")
@@ -311,18 +343,23 @@ def validate_brand_bible_content(content: str, max_size: int = 10 * 1024 * 1024)
 
 
 def validate_file_upload(file_path: str, allowed_extensions: List[str] = None, max_size: int = 10 * 1024 * 1024) -> Dict[str, Any]:
-    """Validate file upload.
+    """
+    Validate a file upload path and return basic file metadata.
     
-    Args:
-        file_path: Path to uploaded file
-        allowed_extensions: List of allowed file extensions
-        max_size: Maximum file size in bytes
-        
+    Validates that the path exists, the file size does not exceed max_size, the file extension is in allowed_extensions,
+    and the filename does not contain suspicious/traversal characters. Returns a metadata dict with keys: `path`,
+    `name`, `size`, `extension`, and `modified`.
+    
+    Parameters:
+        file_path (str): Path to the uploaded file.
+        allowed_extensions (List[str], optional): Allowed extensions (including leading dot). Defaults to [".xml", ".json", ".txt", ".md"].
+        max_size (int, optional): Maximum allowed file size in bytes.
+    
     Returns:
-        Dict[str, Any]: File metadata
-        
+        Dict[str, Any]: File metadata containing `path`, `name`, `size`, `extension`, and `modified` (datetime).
+    
     Raises:
-        ValidationError: If file is invalid
+        ValidationError: If the file is not found, exceeds max_size, has a disallowed extension, or its name matches suspicious patterns.
     """
     if allowed_extensions is None:
         allowed_extensions = [".xml", ".json", ".txt", ".md"]
@@ -372,15 +409,18 @@ def validate_file_upload(file_path: str, allowed_extensions: List[str] = None, m
 
 
 def check_rate_limit(identifier: str, max_requests: int = 60, window_seconds: int = 60) -> bool:
-    """Check if request is within rate limits.
+    """
+    Return True if the identifier is allowed to make a request under the specified rate limits; otherwise return False.
     
-    Args:
-        identifier: Unique identifier (IP, user ID, etc.)
-        max_requests: Maximum requests allowed in window
-        window_seconds: Time window in seconds
-        
+    Tracks request timestamps in an in-memory store and enforces at most `max_requests` within the past `window_seconds`. If allowed, the current timestamp is recorded (mutating the module's rate-limit store). Note: this is an in-memory, process-local limiter and is not persistent or distributed.
+     
+    Parameters:
+        identifier (str): Unique key for rate limiting (e.g., IP address or user ID).
+        max_requests (int): Maximum number of requests permitted within the rolling window.
+        window_seconds (int): Length of the rolling time window in seconds.
+    
     Returns:
-        bool: True if within rate limit, False otherwise
+        bool: True when the request is allowed (and recorded); False when the rate limit has been exceeded.
     """
     now = datetime.now()
     window_start = now - timedelta(seconds=window_seconds)
@@ -401,16 +441,25 @@ def check_rate_limit(identifier: str, max_requests: int = 60, window_seconds: in
 
 
 def validate_shared_store(shared: Dict[str, Any]) -> Dict[str, Any]:
-    """Validate complete shared store structure.
+    """
+    Validate a complete shared store structure and return a sanitized, normalized copy.
     
-    Args:
-        shared: Shared store dictionary to validate
-        
+    Validates the top-level `shared` dict, ensuring required fields are present and correctly typed:
+    - `task_requirements` (dict) with a required `topic_or_goal` (string) and `platforms` (string or list).
+      - `topic_or_goal` is sanitized and validated via `validate_topic`.
+      - `platforms` may be a comma-separated string or a list of platform names; it is validated and normalized via `validate_platforms`.
+    - `brand_bible` (optional dict); if it contains `xml_raw`, that content is validated via `validate_brand_bible_content`.
+    
+    Returns a new dict containing the validated `task_requirements`, `brand_bible`, the original `stream` value (if any), and a `validation_timestamp` (ISO 8601 string).
+    
+    Parameters:
+        shared (Dict[str, Any]): The shared store to validate.
+    
     Returns:
-        Dict[str, Any]: Validated shared store
-        
+        Dict[str, Any]: A validated and normalized shared store with a `validation_timestamp`.
+    
     Raises:
-        ValidationError: If shared store is invalid
+        ValidationError: If `shared` or any required subfield is missing, has the wrong type, or fails validation.
     """
     if not isinstance(shared, dict):
         raise ValidationError("Shared store must be a dictionary", "shared", "TYPE_ERROR")
@@ -467,13 +516,16 @@ def validate_shared_store(shared: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def sanitize_for_llm_prompt(text: str) -> str:
-    """Sanitize text for use in LLM prompts to prevent injection attacks.
+    """
+    Prepare and sanitize a string for safe inclusion in LLM prompts.
     
-    Args:
-        text: Text to sanitize
-        
-    Returns:
-        str: Sanitized text safe for LLM prompts
+    Returns a sanitized version of `text` suitable for embedding in prompt templates:
+    - Non-string inputs return an empty string.
+    - Removes ASCII control characters and null bytes.
+    - Escapes backslashes, quotes, and common whitespace characters (newline, carriage return, tab) into their literal escape sequences.
+    - Strips HTML-like tags and truncates output to 10,000 characters, appending an ellipsis if truncated.
+    
+    This function performs lightweight, conservative sanitization to reduce prompt-injection risk; it is not a substitute for context-specific escaping or a full HTML/XML sanitizer.
     """
     if not isinstance(text, str):
         return ""
@@ -504,18 +556,24 @@ def sanitize_for_llm_prompt(text: str) -> str:
 
 
 def validate_and_sanitize_inputs(topic: str, platforms_text: str, brand_bible_content: str = "") -> Dict[str, Any]:
-    """Comprehensive validation and sanitization of all user inputs.
+    """
+    Validate and sanitize topic, platforms, and optional brand bible content and return a normalized "shared" payload.
     
-    Args:
-        topic: User-provided topic
-        platforms_text: Comma-separated platform names
-        brand_bible_content: Optional brand bible content
-        
+    Performs high-level orchestration: sanitizes the topic, normalizes and validates comma-separated platform names, validates optional brand bible content, assembles a canonical shared dictionary and runs final validation via validate_shared_store.
+    
+    Parameters:
+        topic: The user-provided topic or goal string (will be sanitized and length-checked).
+        platforms_text: Comma-separated platform names (case/abbreviation-normalized and deduplicated).
+        brand_bible_content: Optional raw brand bible text (validated and size-checked); pass empty string if none.
+    
     Returns:
-        Dict[str, Any]: Validated and sanitized inputs
-        
+        Dict[str, Any]: A validated shared store containing at minimum:
+            - task_requirements: {"platforms": List[str], "topic_or_goal": str}
+            - brand_bible: {"xml_raw": str}
+            - stream: None (reserved)
+    
     Raises:
-        ValidationError: If any input is invalid
+        ValidationError: If any component (topic, platforms, or brand bible) fails validation.
     """
     try:
         # Validate and sanitize topic
