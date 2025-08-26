@@ -1,0 +1,204 @@
+# Testing dependencies for the project
+# Install with: pip install -r requirements-test.txt
+
+# Core testing framework
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
+pytest-asyncio>=0.21.0
+pytest-xdist>=3.0.0
+
+# Test coverage and reporting
+coverage>=7.0.0
+pytest-html>=3.1.0
+pytest-json-report>=1.5.0
+
+# Mocking and test utilities
+unittest-mock>=1.0.1
+responses>=0.23.0
+httpretty>=1.1.4
+freezegun>=1.2.0
+
+# Type checking for tests
+mypy>=1.0.0
+types-requests>=2.28.0
+types-PyYAML>=6.0.0
+
+# Code quality and linting
+flake8>=6.0.0
+black>=23.0.0
+isort>=5.12.0
+pylint>=2.17.0
+
+# Performance testing
+pytest-benchmark>=4.0.0
+
+# Security testing
+bandit>=1.7.0
+safety>=2.3.0
+
+# Documentation testing
+pytest-docstyle>=1.0.0
+
+# Integration testing
+pytest-selenium>=4.0.0
+pytest-playwright>=0.3.0
+
+# API testing
+pytest-requests>=0.10.0
+pytest-httpx>=0.24.0
+
+# Database testing
+pytest-postgresql>=4.1.0
+pytest-mysql>=4.1.0
+
+# Environment and configuration testing
+pytest-env>=1.1.0
+pytest-dotenv>=1.0.0
+
+# Fixture and data testing
+factory-boy>=3.2.0
+faker>=18.0.0
+
+# Async testing
+pytest-trio>=0.8.0
+pytest-aiohttp>=1.0.0
+
+# Property-based testing
+hypothesis>=6.70.0
+pytest-hypothesis>=6.70.0
+
+# Mutation testing
+mutmut>=2.2.0
+
+# Test data generation
+mimesis>=8.0.0
+
+# Test reporting and visualization
+pytest-json-report>=1.5.0
+pytest-html>=3.1.0
+pytest-metadata>=3.0.0
+
+# Debugging and profiling
+pytest-pdb>=0.2.0
+pytest-profiling>=1.7.0
+
+# Parallel testing
+pytest-xdist>=3.0.0
+pytest-parallel>=0.1.0
+
+# Test isolation
+pytest-randomly>=3.15.0
+pytest-repeat>=0.9.1
+
+# Test discovery and filtering
+pytest-k>=0.4.0
+pytest-watch>=4.2.0
+
+# Test data management
+pytest-datadir>=1.4.0
+pytest-datafiles>=3.0.0
+
+# Test configuration
+pytest-ini>=0.2.0
+pytest-custom-exit-code>=0.3.0
+
+# Test utilities
+pytest-timeout>=2.1.0
+pytest-rerunfailures>=11.1.0
+pytest-retry>=1.4.0
+
+# Web testing
+pytest-selenium>=4.0.0
+pytest-playwright>=0.3.0
+selenium>=4.0.0
+playwright>=1.30.0
+
+# API testing
+requests>=2.28.0
+httpx>=0.24.0
+
+# Data validation testing
+jsonschema>=4.17.0
+pydantic>=2.0.0
+
+# File and I/O testing
+pathlib2>=2.3.7
+tempfile>=0.0.1
+
+# Network testing
+pytest-socket>=0.6.0
+pytest-freezegun>=0.2.0
+
+# Memory and performance testing
+pytest-memray>=1.4.0
+pytest-benchmark>=4.0.0
+
+# Logging and monitoring testing
+pytest-logger>=0.5.1
+pytest-caplog>=0.1.0
+
+# Configuration testing
+pytest-env>=1.1.0
+pytest-dotenv>=1.0.0
+
+# Database testing (if needed)
+# pytest-postgresql>=4.1.0
+# pytest-mysql>=4.1.0
+# pytest-mongodb>=2.2.0
+
+# Cache testing
+pytest-cache>=1.0.0
+
+# Test documentation
+pytest-docstyle>=1.0.0
+pytest-html>=3.1.0
+
+# Development tools
+ipython>=8.0.0
+jupyter>=1.0.0
+notebook>=6.5.0
+
+# Debugging
+pdbpp>=0.10.3
+ipdb>=0.13.13
+
+# Code formatting and linting
+black[jupyter]>=23.0.0
+isort[pyproject]>=5.12.0
+flake8-bugbear>=23.0.0
+flake8-comprehensions>=4.0.0
+flake8-docstrings>=1.7.0
+
+# Type checking
+mypy[extras]>=1.0.0
+types-requests>=2.28.0
+types-PyYAML>=6.0.0
+types-setuptools>=65.0.0
+
+# Security
+bandit[toml]>=1.7.0
+safety>=2.3.0
+
+# Documentation
+sphinx>=6.0.0
+sphinx-rtd-theme>=1.2.0
+myst-parser>=1.0.0
+
+# Build and packaging
+build>=0.10.0
+twine>=4.0.0
+wheel>=0.40.0
+
+# CI/CD
+pre-commit>=3.0.0
+tox>=4.0.0
+
+# Monitoring and profiling
+memory-profiler>=0.60.0
+psutil>=5.9.0
+
+# Utilities
+click>=8.1.0
+rich>=13.0.0
+tqdm>=4.65.0

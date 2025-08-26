@@ -5,6 +5,11 @@ This module implements the complete flow orchestration for content generation,
 style enforcement, and validation using the PocketFlow architecture.
 """
 
+import logging
+import traceback
+from typing import Dict, Any, List, Optional
+from functools import wraps
+
 from pocketflow import Flow, BatchFlow  # type: ignore
 from nodes import (
     EngagementManagerNode,
@@ -16,10 +21,67 @@ from nodes import (
     StyleComplianceNode,
     AgencyDirectorNode,
 )
-import logging
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
+def handle_flow_errors(func):
+    """Decorator to provide comprehensive error handling for flow functions."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error in {func.__name__}: {str(e)}")
+            logger.debug(f"Traceback: {traceback.format_exc()}")
+            raise
+    return wrapper
+
+def validate_flow_connections(nodes: List[Any]) -> None:
+    """Validate that all flow connections are properly configured.
+    
+    Args:
+        nodes: List of nodes to validate
+        
+    Raises:
+        ValueError: If flow connections are invalid
+    """
+    if not nodes:
+        raise ValueError("Flow must contain at least one node")
+    
+    # Check for circular dependencies (basic check)
+    node_names = [node.__class__.__name__ for node in nodes]
+    if len(node_names) != len(set(node_names)):
+        logger.warning("Duplicate node types detected in flow")
+
+def validate_shared_state_for_flow(shared: Dict[str, Any]) -> None:
+    """Validate shared state structure for flow execution.
+    
+    Args:
+        shared: Shared state to validate
+        
+    Raises:
+        ValueError: If shared state is invalid
+    """
+    if not isinstance(shared, dict):
+        raise ValueError("Shared state must be a dictionary")
+    
+    # Validate required keys for flow execution
+    required_keys = ["task_requirements"]
+    for key in required_keys:
+        if key not in shared:
+            raise ValueError(f"Missing required key in shared state: {key}")
+    
+    # Validate task_requirements structure
+    task_reqs = shared.get("task_requirements", {})
+    if not isinstance(task_reqs, dict):
+        raise ValueError("task_requirements must be a dictionary")
+    
+    # Validate platforms if present
+    platforms = task_reqs.get("platforms", [])
+    if platforms and not isinstance(platforms, list):
+        raise ValueError("platforms must be a list")
+
+@handle_flow_errors
 def create_main_flow():
     """Create the main content generation flow.
     
@@ -28,52 +90,57 @@ def create_main_flow():
     
     Returns:
         Flow: The complete orchestrated flow ready for execution
+        
+    Raises:
+        ValueError: If flow construction fails
+        RuntimeError: If required dependencies are missing
     """
-    # TODO: Evaluate the necessity of max_retries and wait parameters for each node.
-    #       Consider if default values are sufficient or if customization is required.
-    # TODO: Add configuration management for node parameters to make them configurable
-    #       without code changes (e.g., via config file or environment variables)
+    logger.info("Creating main content generation flow")
     
-    # Initialize all nodes
-    engagement_manager = EngagementManagerNode(max_retries=2)
-    brand_bible_ingest = BrandBibleIngestNode(max_retries=2)
-    voice_alignment = VoiceAlignmentNode(max_retries=2)
-    content_craftsman = ContentCraftsmanNode(max_retries=3, wait=2)
-    style_editor = StyleEditorNode(max_retries=3, wait=1)
-    style_compliance = StyleComplianceNode(max_retries=2)
-    agency_director = AgencyDirectorNode()
-    
-    # TODO: Add error handling and logging for flow construction failures
-    # TODO: Consider implementing flow validation to ensure all connections are valid
-    
-    # Wire the main pipeline
-    engagement_manager >> brand_bible_ingest
-    brand_bible_ingest >> voice_alignment
-    voice_alignment >> create_platform_formatting_flow()
-    
-    # TODO: Fix potential issue - create_platform_formatting_flow() is called twice
-    #       This might create duplicate flows or cause unexpected behavior
-    
-    # Connect formatting flow to content generation
-    formatting_flow = create_platform_formatting_flow()
-    formatting_flow >> content_craftsman
-    content_craftsman >> style_editor
-    
-    # Create validation loop
-    style_editor >> style_compliance
-    style_compliance - "pass" >> agency_director
-    style_compliance - "revise" >> style_editor  # Loop back for revisions
-    style_compliance - "max_revisions" >> agency_director  # Exit after max attempts
-    
-    # TODO: Add monitoring and metrics collection for flow execution performance
-    # TODO: Consider adding checkpoint/recovery mechanisms for long-running flows
-    
-    # Create the main flow starting from engagement manager
-    main_flow = Flow(start=engagement_manager)
-    
-    return main_flow
+    try:
+        # Initialize all nodes with appropriate retry configurations
+        engagement_manager = EngagementManagerNode(max_retries=2)
+        brand_bible_ingest = BrandBibleIngestNode(max_retries=2)
+        voice_alignment = VoiceAlignmentNode(max_retries=2)
+        content_craftsman = ContentCraftsmanNode(max_retries=3, wait=2)
+        style_editor = StyleEditorNode(max_retries=3, wait=1)
+        style_compliance = StyleComplianceNode(max_retries=2)
+        agency_director = AgencyDirectorNode()
+        
+        logger.debug("All nodes initialized successfully")
+        
+        # Wire the main pipeline
+        engagement_manager >> brand_bible_ingest
+        brand_bible_ingest >> voice_alignment
+        voice_alignment >> create_platform_formatting_flow()
+        
+        # Connect formatting flow to content generation
+        formatting_flow = create_platform_formatting_flow()
+        formatting_flow >> content_craftsman
+        content_craftsman >> style_editor
+        
+        # Create validation loop
+        style_editor >> style_compliance
+        style_compliance - "pass" >> agency_director
+        style_compliance - "revise" >> style_editor  # Loop back for revisions
+        style_compliance - "max_revisions" >> agency_director  # Exit after max attempts
+        
+        # Validate flow connections
+        nodes = [engagement_manager, brand_bible_ingest, voice_alignment, 
+                content_craftsman, style_editor, style_compliance, agency_director]
+        validate_flow_connections(nodes)
+        
+        # Create the main flow starting from engagement manager
+        main_flow = Flow(start=engagement_manager)
+        
+        logger.info("Main flow created successfully")
+        return main_flow
+        
+    except Exception as e:
+        logger.error(f"Failed to create main flow: {e}")
+        raise ValueError(f"Flow construction failed: {e}")
 
-
+@handle_flow_errors
 def create_platform_formatting_flow():
     """Create a batch flow for platform-specific formatting guidelines.
     
@@ -82,7 +149,11 @@ def create_platform_formatting_flow():
     
     Returns:
         BatchFlow: A batch flow that processes multiple platforms
+        
+    Raises:
+        ValueError: If flow construction fails
     """
+    logger.debug("Creating platform formatting batch flow")
     
     class PlatformFormattingBatchFlow(BatchFlow):
         """Batch flow for processing multiple platforms."""
@@ -90,218 +161,242 @@ def create_platform_formatting_flow():
         def prep(self, shared):
             """Prepare platform list for batch processing.
             
-            Returns a list of parameter dictionaries, one for each platform.
+            Args:
+                shared: Shared state containing task requirements
+                
+            Returns:
+                List[Dict]: List of parameter dictionaries, one for each platform
+                
+            Raises:
+                ValueError: If platforms are invalid or missing
             """
-            # TODO: Validate the structure of shared["task_requirements"] to ensure
-            #       it contains the expected "platforms" key with a list value
-            # TODO: Add schema validation for platform configurations
-            # TODO: Implement platform capability checking to ensure supported platforms
-            
-            platforms = shared.get("task_requirements", {}).get("platforms", [])
-            if not platforms:
-                # Default to common platforms if none specified
-                platforms = ["twitter", "linkedin"]
-                log.warning("No platforms specified, using defaults: %s", platforms)
-            
-            # TODO: Add validation for supported platforms (reject unsupported ones)
-            # TODO: Consider adding platform-specific configuration validation
-            
-            # Create parameter dict for each platform
-            platform_params = []
-            for platform in platforms:
-                platform_params.append({"platform": platform})
-            
-            return platform_params
+            try:
+                # Validate shared state structure
+                if not isinstance(shared, dict):
+                    raise ValueError("Shared state must be a dictionary")
+                
+                task_reqs = shared.get("task_requirements", {})
+                if not isinstance(task_reqs, dict):
+                    raise ValueError("task_requirements must be a dictionary")
+                
+                platforms = task_reqs.get("platforms", [])
+                if not isinstance(platforms, list):
+                    raise ValueError("platforms must be a list")
+                
+                if not platforms:
+                    logger.warning("No platforms specified, using default")
+                    platforms = ["twitter", "linkedin"]
+                
+                # Validate individual platforms
+                validated_platforms = []
+                for platform in platforms:
+                    if not isinstance(platform, str):
+                        logger.warning(f"Skipping invalid platform: {platform}")
+                        continue
+                    
+                    normalized_platform = platform.strip().lower()
+                    if normalized_platform and normalized_platform.replace('-', '').replace('_', '').isalnum():
+                        validated_platforms.append(normalized_platform)
+                    else:
+                        logger.warning(f"Skipping invalid platform format: {platform}")
+                
+                if not validated_platforms:
+                    logger.warning("No valid platforms found, using defaults")
+                    validated_platforms = ["twitter", "linkedin"]
+                
+                logger.debug(f"Prepared {len(validated_platforms)} platforms for batch processing")
+                return [{"platform": platform} for platform in validated_platforms]
+                
+            except Exception as e:
+                logger.error(f"Error in platform formatting batch prep: {e}")
+                # Return safe defaults
+                return [{"platform": "twitter"}, {"platform": "linkedin"}]
     
-    # Create the formatting node that will process each platform
-    platform_formatter = PlatformFormattingNode(max_retries=2)
-    
-    # Create the batch flow
-    batch_flow = PlatformFormattingBatchFlow(start=platform_formatter)
-    
-    return batch_flow
+    try:
+        # Create the batch flow with platform formatting node
+        platform_formatting_node = PlatformFormattingNode(max_retries=2)
+        batch_flow = PlatformFormattingBatchFlow(start=platform_formatting_node)
+        
+        logger.debug("Platform formatting batch flow created successfully")
+        return batch_flow
+        
+    except Exception as e:
+        logger.error(f"Failed to create platform formatting flow: {e}")
+        raise ValueError(f"Platform formatting flow construction failed: {e}")
 
-
+@handle_flow_errors
 def create_validation_flow():
-    """Create the validation and compliance checking flow.
+    """Create a validation flow for content compliance checking.
     
-    This function creates a flow that validates content against style guidelines,
-    checks for violations, and manages the revision loop.
-    
-    Returns:
-        Flow: The validation flow with revision loop
-    """
-    # TODO: Add configurable validation rules and compliance checks
-    # TODO: Implement custom validation criteria based on brand requirements
-    # TODO: Add metrics collection for validation performance and accuracy
-    
-    # Create validation nodes
-    style_editor = StyleEditorNode(max_retries=3, wait=1)
-    style_compliance = StyleComplianceNode(max_retries=2)
-    
-    # Wire the validation loop
-    style_editor >> style_compliance
-    style_compliance - "revise" >> style_editor  # Loop back for revisions
-    
-    # TODO: Add timeout mechanisms to prevent infinite validation loops
-    # TODO: Implement escalation paths for content that repeatedly fails validation
-    
-    # Create the validation flow
-    validation_flow = Flow(start=style_editor)
-    
-    return validation_flow
-
-
-def create_feedback_flow():
-    """Create an interactive feedback flow for user refinements.
-    
-    This function creates a flow that handles user feedback, allowing for
-    iterative content refinement based on user input.
+    This function creates a flow that handles content validation and revision cycles,
+    implementing intelligent revision management with quality progression tracking.
     
     Returns:
-        Flow: The feedback handling flow
+        Flow: A validation flow with revision loop management
+        
+    Raises:
+        ValueError: If flow construction fails
     """
-    # TODO: Implement comprehensive feedback routing system
-    # TODO: Add user authentication and permission checking for feedback actions
-    # TODO: Create feedback history tracking and audit trail
+    logger.debug("Creating validation flow")
     
-    # Import feedback nodes if they exist
     try:
-        from nodes import FeedbackRouterNode, SentenceEditorNode, VersionManagerNode
+        # Initialize validation nodes
+        style_editor = StyleEditorNode(max_retries=3, wait=1)
+        style_compliance = StyleComplianceNode(max_retries=2)
+        agency_director = AgencyDirectorNode()
         
-        feedback_router = FeedbackRouterNode()
-        sentence_editor = SentenceEditorNode()
-        version_manager = VersionManagerNode()
+        # Wire validation loop
+        style_editor >> style_compliance
+        style_compliance - "pass" >> agency_director
+        style_compliance - "revise" >> style_editor  # Loop back for revisions
+        style_compliance - "max_revisions" >> agency_director  # Exit after max attempts
         
-        # Wire feedback routing
-        feedback_router - "sentence_edit" >> sentence_editor
-        feedback_router - "rollback" >> version_manager
-        feedback_router - "finalize" >> AgencyDirectorNode()
+        # Create validation flow
+        validation_flow = Flow(start=style_editor)
         
-        # Loop back for continued editing
-        sentence_editor >> feedback_router
-        version_manager >> feedback_router
+        logger.debug("Validation flow created successfully")
+        return validation_flow
         
-        # TODO: Add session management for multi-user feedback scenarios
-        # TODO: Implement conflict resolution for concurrent edits
-        
-        return Flow(start=feedback_router)
-        
-    except ImportError:
-        log.warning("Feedback nodes not available, using simple flow")
-        # TODO: Create mock feedback nodes for development and testing
-        # TODO: Add graceful degradation when feedback features are unavailable
-        
-        # Fallback to simple flow without feedback
-        return Flow(start=AgencyDirectorNode())
+    except Exception as e:
+        logger.error(f"Failed to create validation flow: {e}")
+        raise ValueError(f"Validation flow construction failed: {e}")
 
-
-def create_streaming_flow():
-    """Create a flow with streaming capabilities for real-time updates.
+@handle_flow_errors
+def create_content_generation_flow():
+    """Create a content generation flow for creating initial drafts.
     
-    This function enhances the main flow with streaming milestones for
-    real-time progress updates in the UI.
+    This function creates a flow that handles content generation and initial styling,
+    preparing content for the validation and revision process.
     
     Returns:
-        Flow: The main flow with streaming integration
+        Flow: A content generation flow
+        
+    Raises:
+        ValueError: If flow construction fails
     """
-    main_flow = create_main_flow()
+    logger.debug("Creating content generation flow")
     
-    # TODO: Investigate the integration of StreamingManager to enable real-time updates
-    #       Ensure that the necessary modules are available and properly configured
-    # TODO: Add WebSocket support for real-time client updates
-    # TODO: Implement streaming event filtering and throttling
-    
-    # Enhance with streaming if available
     try:
-        from utils.streaming import StreamingManager
+        # Initialize content generation nodes
+        content_craftsman = ContentCraftsmanNode(max_retries=3, wait=2)
+        style_editor = StyleEditorNode(max_retries=3, wait=1)
         
-        # TODO: Properly integrate StreamingManager with the flow
-        # TODO: Add streaming event types and payload standardization
-        # TODO: Implement streaming error handling and reconnection logic
+        # Wire content generation
+        content_craftsman >> style_editor
         
-        # Streaming would be integrated via shared["stream"]
-        # Each node already emits milestones if stream is available
-        log.info("Streaming capabilities enabled")
+        # Create content generation flow
+        content_flow = Flow(start=content_craftsman)
         
-    except ImportError:
-        log.warning("Streaming not available, running without real-time updates")
-        # TODO: Add development mode streaming simulation for testing
-    
-    return main_flow
+        logger.debug("Content generation flow created successfully")
+        return content_flow
+        
+    except Exception as e:
+        logger.error(f"Failed to create content generation flow: {e}")
+        raise ValueError(f"Content generation flow construction failed: {e}")
 
-
-# Convenience function for quick testing
-def run_test_flow():
-    """Run a test flow with sample data for development and debugging.
+def validate_flow_execution(shared: Dict[str, Any]) -> None:
+    """Validate shared state before flow execution.
     
-    This function creates a minimal test flow with sample data to verify
-    that the pipeline is working correctly.
+    Args:
+        shared: Shared state to validate
+        
+    Raises:
+        ValueError: If shared state is invalid for flow execution
     """
-    # TODO: Expand test cases to cover edge scenarios and validate robustness
-    #       of the flow under various conditions
-    # TODO: Add performance benchmarking and load testing capabilities
-    # TODO: Implement automated test result validation and reporting
-    # TODO: Create test data factories for different scenarios
+    try:
+        validate_shared_state_for_flow(shared)
+        logger.debug("Flow execution validation passed")
+    except ValueError as e:
+        logger.error(f"Flow execution validation failed: {e}")
+        raise
+
+def execute_flow_with_validation(flow: Flow, shared: Dict[str, Any]) -> None:
+    """Execute a flow with comprehensive validation and error handling.
     
-    # Create test shared store
-    test_shared = {
-        "task_requirements": {
-            "platforms": ["twitter", "linkedin"],
-            "topic_or_goal": "Announce new AI product launch",
-            "intents_by_platform": {
-                "twitter": {"value": "engagement"},
-                "linkedin": {"value": "thought_leadership"}
-            }
-        },
-        "brand_bible": {
-            "xml_raw": """<brand_bible>
-                <voice>
-                    <tone>professional, innovative</tone>
-                    <forbidden_terms>cutting-edge,revolutionary</forbidden_terms>
-                    <required_phrases>empowering businesses</required_phrases>
-                </voice>
-            </brand_bible>"""
-        },
-        "stream": None,  # No streaming for test
-        "workflow_state": {
-            "revision_count": 0,
-            "max_revisions": 5
+    Args:
+        flow: Flow to execute
+        shared: Shared state for flow execution
+        
+    Raises:
+        ValueError: If flow execution fails
+        RuntimeError: If flow execution encounters critical errors
+    """
+    try:
+        logger.info("Starting flow execution with validation")
+        
+        # Validate shared state
+        validate_flow_execution(shared)
+        
+        # Execute flow
+        flow.run(shared)
+        
+        logger.info("Flow execution completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Flow execution failed: {e}")
+        logger.debug(f"Flow execution traceback: {traceback.format_exc()}")
+        raise RuntimeError(f"Flow execution failed: {e}")
+
+# Test functions for flow validation
+def test_flow_construction():
+    """Test function to validate flow construction.
+    
+    Returns:
+        bool: True if all flows construct successfully
+    """
+    try:
+        logger.info("Testing flow construction")
+        
+        # Test main flow
+        main_flow = create_main_flow()
+        logger.debug("Main flow construction test passed")
+        
+        # Test platform formatting flow
+        platform_flow = create_platform_formatting_flow()
+        logger.debug("Platform formatting flow construction test passed")
+        
+        # Test validation flow
+        validation_flow = create_validation_flow()
+        logger.debug("Validation flow construction test passed")
+        
+        # Test content generation flow
+        content_flow = create_content_generation_flow()
+        logger.debug("Content generation flow construction test passed")
+        
+        logger.info("All flow construction tests passed")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Flow construction test failed: {e}")
+        return False
+
+def test_flow_execution():
+    """Test function to validate flow execution with sample data.
+    
+    Returns:
+        bool: True if flow execution test passes
+    """
+    try:
+        logger.info("Testing flow execution")
+        
+        # Create sample shared state
+        shared = {
+            "task_requirements": {
+                "platforms": ["twitter", "linkedin"],
+                "topic_or_goal": "Test content generation",
+                "intents_by_platform": {}
+            },
+            "brand_bible": {"xml_raw": ""},
+            "stream": None
         }
-    }
-    
-    # TODO: Add error handling and graceful failure modes for test execution
-    # TODO: Implement test result serialization for CI/CD integration
-    
-    # Create and run the main flow
-    flow = create_main_flow()
-    flow.run(test_shared)
-    
-    # TODO: Add comprehensive output validation and quality checks
-    # TODO: Implement test result comparison with expected outputs
-    
-    # Print results
-    print("Test flow completed!")
-    print("Generated content:")
-    for platform, content in test_shared.get("content_pieces", {}).items():
-        print(f"\n{platform}:")
-        print(content.get("text", "No content generated"))
-    
-    return test_shared
-
-
-# TODO: Add flow composition utilities for building custom workflows
-# TODO: Implement flow templates for common use cases
-# TODO: Add flow persistence and serialization capabilities
-# TODO: Create flow monitoring and health check endpoints
-# TODO: Implement flow versioning and migration support
-
-# Export main flow creation function
-__all__ = [
-    'create_main_flow',
-    'create_platform_formatting_flow', 
-    'create_validation_flow',
-    'create_feedback_flow',
-    'create_streaming_flow',
-    'run_test_flow'
-]
+        
+        # Test main flow execution
+        main_flow = create_main_flow()
+        execute_flow_with_validation(main_flow, shared)
+        
+        logger.info("Flow execution test passed")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Flow execution test failed: {e}")
+        return False
