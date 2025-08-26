@@ -111,20 +111,13 @@ def run_demo() -> None:
 
 
 def validate_shared_store(shared: Dict[str, Any]) -> None:
-    """Validate minimal `shared` dict required by the flows.
+    """Validate minimal shared dict required by the flows.
 
     This function performs lightweight checks only. More detailed schema
     validation should be done using Pydantic in higher-assurance contexts.
 
-    Pre-condition: `shared` is provided by caller.
+    Pre-condition: shared is provided by caller.
     Post-condition: raises when structure is invalid; otherwise returns None.
-
-    Test stub:
-        def test_validate_shared_store_invalid():
-            with pytest.raises(ValueError):
-                validate_shared_store({})
-
-    Lint: precise pragmas only where necessary.
     """
     if not isinstance(shared, dict):
         raise TypeError("shared must be a dict")
@@ -136,8 +129,6 @@ def validate_shared_store(shared: Dict[str, Any]) -> None:
         raise ValueError("task_requirements must include 'platforms'")
     if not isinstance(platforms, list):
         raise TypeError("task_requirements['platforms'] must be a list")
-
-    # (function continues)
 
 
 def create_gradio_interface() -> Any:

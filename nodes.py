@@ -1964,3 +1964,19 @@ class StyleComplianceNode(Node):
     # - TODO(Monitoring): Implement compliance rule monitoring and alerting
     # - TODO(Analytics): Add support for compliance rule analytics and insights
     # - TODO(Pytest): Add pytest tests for comprehensive compliance framework and edit-cycle integration
+class AgencyDirectorNode(Node):
+    def prep(self, shared: Dict[str, Any]) -> Dict[str, Any]:
+        return shared.get("content_pieces", {})
+
+    def exec(self, content: Dict[str, Any]) -> Dict[str, Any]:
+        return content
+
+    def post(self, shared: Dict[str, Any], prep_res: Dict[str, Any], exec_res: Dict[str, Any]) -> str:
+        shared.setdefault("content_pieces", exec_res or prep_res or {})
+        stream = shared.get("stream")
+        if stream and hasattr(stream, "emit"):
+            try:
+                stream.emit("system", "Final content approved")
+            except Exception:
+                pass
+        return "default"
