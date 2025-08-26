@@ -8,7 +8,6 @@ requests>=2.31.0
 python-dotenv>=1.0.0
 spacy>=3.7.0
 nltk>=3.8
-difflib
 hashlib
 json
 datetime
