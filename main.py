@@ -136,8 +136,18 @@ def validate_shared_store(shared: Dict[str, Any]) -> None:
         raise ValueError("task_requirements must include 'platforms'")
     if not isinstance(platforms, list):
         raise TypeError("task_requirements['platforms'] must be a list")
-
-    # (function continues)
+    # Elements must be strings (allow empty list; flow will default later)
+    for idx, p in enumerate(platforms):
+        if not isinstance(p, str):
+            raise TypeError(f"platforms[{idx}] must be a string")
+    # Topic is optional but if present must be a string
+    topic = tr.get("topic_or_goal", "")
+    if topic is not None and not isinstance(topic, str):
+        raise TypeError("task_requirements['topic_or_goal'] must be a string if provided")
+    # Optional brand_bible container should be a dict if present
+    bb = shared.get("brand_bible")
+    if bb is not None and not isinstance(bb, dict):
+        raise TypeError("shared['brand_bible'] must be a dict if provided")
 
 
 def create_gradio_interface() -> Any:

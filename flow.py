@@ -20,6 +20,7 @@ import logging
 
 log = logging.getLogger(__name__)
 
+
 def create_main_flow():
     """Create the main content generation flow.
     
@@ -46,16 +47,16 @@ def create_main_flow():
     # TODO: Add error handling and logging for flow construction failures
     # TODO: Consider implementing flow validation to ensure all connections are valid
     
+    # Create a single instance of the formatting flow and wire it
+    formatting_flow = create_platform_formatting_flow()
+
     # Wire the main pipeline
     engagement_manager >> brand_bible_ingest
     brand_bible_ingest >> voice_alignment
-    voice_alignment >> create_platform_formatting_flow()
-    
-    # TODO: Fix potential issue - create_platform_formatting_flow() is called twice
-    #       This might create duplicate flows or cause unexpected behavior
+    # Previously, create_platform_formatting_flow() was invoked inline causing duplicate instances
+    voice_alignment >> formatting_flow
     
     # Connect formatting flow to content generation
-    formatting_flow = create_platform_formatting_flow()
     formatting_flow >> content_craftsman
     content_craftsman >> style_editor
     
@@ -72,6 +73,7 @@ def create_main_flow():
     main_flow = Flow(start=engagement_manager)
     
     return main_flow
+
 
 
 def create_platform_formatting_flow():
@@ -103,15 +105,28 @@ def create_platform_formatting_flow():
                 platforms = ["twitter", "linkedin"]
                 log.warning("No platforms specified, using defaults: %s", platforms)
             
-            # TODO: Add validation for supported platforms (reject unsupported ones)
-            # TODO: Consider adding platform-specific configuration validation
+            # Normalize, deduplicate, and validate supported platforms
+            normalized = []
+            for p in platforms:
+                if isinstance(p, str):
+                    normalized.append(p.strip().lower())
+            # Supported set can be expanded as capabilities grow
+            supported = {"twitter", "linkedin", "facebook", "instagram"}
+            filtered = []
+            dropped = []
+            for p in dict.fromkeys(normalized):  # preserve order while deduping
+                if p in supported:
+                    filtered.append({"platform": p})
+                else:
+                    dropped.append(p)
+            if dropped:
+                log.warning("Dropping unsupported platforms: %s", dropped)
+            if not filtered:
+                # Fallback to safe defaults if everything was filtered out
+                filtered = [{"platform": "twitter"}, {"platform": "linkedin"}]
+                log.warning("All requested platforms unsupported; falling back to defaults: twitter, linkedin")
             
-            # Create parameter dict for each platform
-            platform_params = []
-            for platform in platforms:
-                platform_params.append({"platform": platform})
-            
-            return platform_params
+            return filtered
     
     # Create the formatting node that will process each platform
     platform_formatter = PlatformFormattingNode(max_retries=2)
@@ -120,6 +135,7 @@ def create_platform_formatting_flow():
     batch_flow = PlatformFormattingBatchFlow(start=platform_formatter)
     
     return batch_flow
+
 
 
 def create_validation_flow():

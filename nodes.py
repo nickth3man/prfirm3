@@ -1629,22 +1629,15 @@ class StyleEditorNode(Node):
         """
         for p, txt in exec_res.items():
             shared.setdefault("content_pieces", {})
-            # TODO(Preservation): Preserve existing sections and metadata when updating text
-            # TODO(Metadata): Add rewrite metadata (changes made, quality scores, etc.)
-            # TODO(Tracking): Implement rewrite change tracking and diff generation
-            # TODO(Metrics): Add rewrite performance metrics
-            # TODO(Quality): Implement rewrite quality validation
-            # TODO(Compliance): Add rewrite compliance checking results
-            # TODO(Audit): Implement rewrite audit trail
-            # TODO(Analytics): Add rewrite analytics and insights
-            # TODO(Pytest): Add pytest tests for post() method including metadata preservation and tracking
-            shared["content_pieces"][p] = {"text": txt}
-        # TODO(State): Add style_refinements metrics to shared state
-        # TODO(Streaming): Emit streaming milestone for style editing completion
-        # TODO(Streaming): Implement streaming rewrite progress updates
-        # TODO(Streaming): Add streaming rewrite quality scores and metrics
-        # TODO(Streaming): Implement streaming rewrite compliance results
-        # TODO(Streaming): Add streaming rewrite performance metrics
+            existing = shared["content_pieces"].get(p) or {}
+            # Preserve existing sections and metadata when updating text
+            sections = existing.get("sections", {}) if isinstance(existing, dict) else {}
+            metadata = existing.get("metadata", {}) if isinstance(existing, dict) else {}
+            shared["content_pieces"][p] = {
+                "text": txt,
+                "sections": sections,
+                "metadata": metadata,
+            }
         return "default"
 
     # TODO(Enhancement): StyleEditorNode
